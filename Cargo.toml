@@ -1,0 +1,12 @@
+[package]
+name = "antmon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+x11 = "2.21.0"
+futures-core = "0.3.34"
+byor = { version = "1.0.0", default-features = false, features = ["channel"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11 = { version = "2.21.0", features = ["xlib"] }
