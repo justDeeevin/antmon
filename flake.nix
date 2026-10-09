@@ -15,7 +15,11 @@
         inherit system;
         overlays = [ (import rust-overlay) ];
       };
-      dylibs = with pkgs; [ libx11.dev ];
+      dylibs = with pkgs; [
+        libx11.dev
+        libxi.dev
+        libxtst
+      ];
     in
     {
       devShell.${system} = pkgs.mkShell {

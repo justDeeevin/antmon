@@ -1,7 +1,8 @@
+/// Convert native platform keycodes to [`Key`]s.
 pub mod convert;
 
-use crate::Platform;
-
+#[derive(Debug)]
+/// A keyboard key.
 pub enum Key {
     Escape,
     F1,
@@ -129,9 +130,22 @@ pub enum Key {
     F23,
     F24,
     Menu,
-    Unknown {
-        platform: Platform,
-        code: u32,
-    }, // TODO: possibly more obscure keys.
-       // See https://docs.qmk.fm/keycodes_basic
+    Unknown(PlatformKey),
+    // TODO: possibly more obscure keys.
+    // See https://docs.qmk.fm/keycodes_basic
+}
+
+#[derive(Debug)]
+/// A platform-specific keycode.
+///
+/// Consumers will usually only encounter the variant corresponding to the platform on which the program
+/// is running. However, the [`convert`] functions allow for semantic operations outside of the host
+/// platform, so each variant must be accounted for.
+pub enum PlatformKey {
+    Linux(
+        /// It might be more accurate to use `u8`, but the evdev crate holds a `u16` inside of its
+        /// `KeyCode` struct, so this feels more correct.
+        u16,
+    ),
+    X11(std::ffi::c_uint),
 }
