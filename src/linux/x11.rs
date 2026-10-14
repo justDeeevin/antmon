@@ -1,11 +1,13 @@
 use crate::{
-    Event, EventError, ListenError,
+    ButtonState, Event, EventError, ListenError,
+    button::convert::x11_button,
     key::convert::{linux_keycode, x11_key},
 };
 use byor::fd::{Fd, RuntimeFd};
-use futures_core::Stream;
+use derive_more::{Deref, DerefMut};
+use futures_core::{FusedStream, Stream};
 use std::{
-    ffi::{c_char, c_int, c_uchar, c_uint, c_ulong},
+    ffi::*,
     marker::PhantomData,
     mem::MaybeUninit,
     os::fd::{AsFd, AsRawFd, BorrowedFd},
@@ -14,21 +16,26 @@ use std::{
     task::Poll,
 };
 use tracing::{error, instrument};
-use x11::{xlib::*, xrecord::*};
+use x11::{xinput2::*, xlib::*, xrecord::*};
 
 type Result<T, E = EventError> = std::result::Result<T, E>;
 
 /// Callback closure.
 struct Closure {
+    xi2: bool,
     display: *mut Display,
     tx: Sender<Result<Event>>,
 }
 
-pub fn listen<Rt: RuntimeFd>() -> Result<impl Stream<Item = Result<Event>>, ListenError> {
+pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>, ListenError> {
     let control_display = unsafe { XOpenDisplay(null()) };
     // This is the display that XRecord hijacks in order to listen to events. It is used with
     // EnableContext and ProcessReplies. Its file descriptor is used to poll for events.
     let data_display = unsafe { XOpenDisplay(null()) };
+    let xi_display = unsafe { XOpenDisplay(null()) };
+    if data_display.is_null() || control_display.is_null() || xi_display.is_null() {
+        return Err(ListenError::Platform);
+    }
 
     let mut range = unsafe { XRecordAllocRange() };
     if range.is_null() {
@@ -61,64 +68,257 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl Stream<Item = Result<Event>>, List
     // The context creation has to be flushed before it can be enabled.
     unsafe { XSync(control_display, False) };
 
+    let mut xi_opcode = MaybeUninit::uninit();
+    let xi2 = unsafe {
+        XQueryExtension(
+            xi_display,
+            c"XInputExtension".as_ptr(),
+            xi_opcode.as_mut_ptr(),
+            MaybeUninit::uninit().as_mut_ptr(),
+            MaybeUninit::uninit().as_mut_ptr(),
+        )
+    } == True
+        && {
+            let mut major = 2;
+            let mut minor = 3;
+
+            #[allow(non_upper_case_globals)]
+            match unsafe { XIQueryVersion(xi_display, &raw mut major, &raw mut minor) } as c_uchar {
+                Success => true,
+                BadRequest => false,
+                _ => return Err(ListenError::Platform),
+            }
+        };
+
     let (tx, rx) = channel();
     let closure = Box::into_raw(Box::new(Closure {
+        xi2,
         display: control_display,
         tx,
     }));
 
-    let result = unsafe {
+    if unsafe {
         XRecordEnableContextAsync(
             data_display,
             context,
             Some(xrecord_callback),
             closure.cast(),
         )
-    };
-    if result == 0 {
+    } == 0
+    {
         return Err(ListenError::Platform);
     }
-    let fd = Rt::Fd::new(unsafe { BorrowedFd::borrow_raw(XConnectionNumber(data_display)) })?;
+
+    // X11 sockets aren't non-blocking. However, all I do is poll, and that doesn't require
+    // non-blocking mode.
+    let record_fd =
+        Rt::Fd::new(unsafe { BorrowedFd::borrow_raw(XConnectionNumber(data_display)) })?;
+
+    let xi = if xi2 {
+        let window = unsafe { XDefaultRootWindow(xi_display) };
+        let mut mask = [0; (XI_RawMotion as usize).div_ceil(8)];
+        XISetMask(&mut mask, XI_RawMotion);
+
+        let mut event_mask = XIEventMask {
+            deviceid: XIAllMasterDevices,
+            mask_len: mask.len() as c_int,
+            mask: mask.as_mut_ptr(),
+        };
+        if unsafe { XISelectEvents(xi_display, window, &raw mut event_mask, 1) } != Success as c_int
+        {
+            return Err(ListenError::Platform);
+        }
+
+        Some(XIInfo {
+            display: xi_display,
+            fd: Rt::Fd::new(unsafe { BorrowedFd::borrow_raw(XConnectionNumber(xi_display)) })?,
+            opcode: unsafe { xi_opcode.assume_init() },
+        })
+    } else {
+        unsafe { XCloseDisplay(xi_display) };
+        None
+    };
 
     Ok(X11Stream {
         rx,
-        fd,
+        record_fd,
+        xi,
         _marker: PhantomData,
-        control_display,
         data_display,
         closure,
         context,
-        dc: false,
         process: true,
+        dc: false,
     })
 }
 
 struct X11Stream<F, I> {
     rx: Receiver<Result<Event>>,
-    fd: F,
+    record_fd: F,
+    xi: Option<XIInfo<F>>,
     _marker: PhantomData<I>,
-    control_display: *mut Display,
     data_display: *mut Display,
+    // Can't hold a Box because it would violate aliasing rules.
     closure: *mut Closure,
     context: c_ulong,
-    dc: bool,
     process: bool,
+    dc: bool,
+}
+
+struct XIInfo<F> {
+    fd: F,
+    display: *mut Display,
+    opcode: c_int,
 }
 
 impl<F, I> Drop for X11Stream<F, I> {
     fn drop(&mut self) {
+        let control_display = unsafe { (*self.closure).display };
         unsafe {
-            XRecordDisableContext(self.control_display, self.context);
-            XRecordFreeContext(self.control_display, self.context);
+            XRecordDisableContext(control_display, self.context);
+            XRecordFreeContext(control_display, self.context);
 
             // Context disable has to be flushed in order to avoid use-after-free.
-            XSync(self.control_display, False);
+            XSync(control_display, False);
             drop(Box::from_raw(self.closure));
 
             XCloseDisplay(self.data_display);
-            XCloseDisplay(self.control_display);
+            XCloseDisplay(control_display);
+            if let Some(XIInfo { display, .. }) = &self.xi {
+                XCloseDisplay(*display);
+            }
         }
     }
+}
+
+#[derive(Deref, DerefMut)]
+#[deref(forward)]
+struct XIDeviceInfoBox(&'static mut XIDeviceInfo);
+
+impl Drop for XIDeviceInfoBox {
+    fn drop(&mut self) {
+        unsafe { XIFreeDeviceInfo(self.0 as *mut _) };
+    }
+}
+
+struct XEventDataBox<T: 'static> {
+    cookie: XGenericEventCookie,
+    _marker: PhantomData<&'static mut T>,
+    display: *mut Display,
+}
+
+impl<T: 'static> XEventDataBox<T> {
+    unsafe fn new(display: *mut Display, cookie: XGenericEventCookie) -> Self {
+        Self {
+            cookie,
+            _marker: PhantomData,
+            display,
+        }
+    }
+}
+
+impl<T: 'static> std::ops::Deref for XEventDataBox<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*(self.cookie.data as *const _) }
+    }
+}
+
+impl<T: 'static> std::ops::DerefMut for XEventDataBox<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *(self.cookie.data as *mut _) }
+    }
+}
+
+impl<T> Drop for XEventDataBox<T> {
+    fn drop(&mut self) {
+        unsafe { XFreeEventData(self.display, &raw mut self.cookie) };
+    }
+}
+
+/// <div class="warning">This function may block. Make sure to check that there is pending data with
+/// <code>XPending</code> before calling.</div>
+fn smooth_scroll(display: *mut Display, opcode: c_int) -> Option<Result<Event>> {
+    let mut event = MaybeUninit::uninit();
+    unsafe { XNextEvent(display, event.as_mut_ptr()) };
+    let mut event = unsafe { event.assume_init() };
+
+    if unsafe { event.type_ } != GenericEvent
+        || unsafe { &event.generic_event_cookie }.extension != opcode
+    {
+        return None;
+    }
+    if unsafe { XGetEventData(display, &raw mut event.generic_event_cookie) } != True {
+        return Some(Err(EventError::GetState));
+    }
+    if unsafe { &event.generic_event_cookie }.evtype != XI_RawMotion {
+        return None;
+    }
+
+    let event = unsafe { XEventDataBox::<XIRawEvent>::new(display, event.generic_event_cookie) };
+    let mut n_devices = 1;
+    let device_info = XIDeviceInfoBox(unsafe {
+        &mut *XIQueryDevice(display, event.sourceid, &raw mut n_devices)
+    });
+    assert!(
+        n_devices == 1,
+        "XIQueryDevice returned more than one device"
+    );
+    let classes = unsafe {
+        std::slice::from_raw_parts_mut(device_info.classes, device_info.num_classes as usize)
+    };
+
+    fn get_axis_info(
+        scroll_type: c_int,
+        classes: &[*mut XIAnyClassInfo],
+    ) -> Option<&XIScrollClassInfo> {
+        classes.iter().find_map(|class| {
+            if unsafe { (**class)._type } == XIScrollClass {
+                let info = unsafe { &*(*class as *mut XIScrollClassInfo) };
+                if info.scroll_type == scroll_type {
+                    return Some(info);
+                }
+            }
+
+            None
+        })
+    }
+
+    let vertical = get_axis_info(XIScrollTypeVertical, classes)?;
+    let horizontal = get_axis_info(XIScrollTypeHorizontal, classes)?;
+
+    let mask = unsafe {
+        std::slice::from_raw_parts(event.valuators.mask, event.valuators.mask_len as usize)
+    };
+    let n_valuators = mask.iter().map(|x| x.count_ones() as usize).sum();
+    let valuators = unsafe { std::slice::from_raw_parts(event.valuators.values, n_valuators) };
+
+    fn byte_level_mask(index: usize) -> u8 {
+        1 << (index % 8)
+    }
+
+    let valuator = |index| {
+        if let Some(byte) = mask.get(index / 8)
+            && (byte & byte_level_mask(index)) != 0
+        {
+            let pos = (0..index)
+                .filter(|i| (byte & byte_level_mask(*i)) != 0)
+                .count();
+            valuators.get(pos).copied()
+        } else {
+            None
+        }
+    };
+
+    Some(Ok(Event::Scroll {
+        dx: valuator(horizontal.number as usize)
+            .map(|v| v / horizontal.increment)
+            .unwrap_or_default(),
+        dy: valuator(vertical.number as usize)
+            .map(|v| v / vertical.increment)
+            .unwrap_or_default(),
+    }))
 }
 
 impl<T: AsFd + AsRawFd, F: Fd<T>> Stream for X11Stream<F, T> {
@@ -131,12 +331,21 @@ impl<T: AsFd + AsRawFd, F: Fd<T>> Stream for X11Stream<F, T> {
         if self.dc {
             return Poll::Ready(None);
         }
-
         let this = unsafe { self.get_unchecked_mut() };
 
-        loop {
+        'out: loop {
             if this.process {
                 unsafe { XRecordProcessReplies(this.data_display) };
+                if let Some(XIInfo {
+                    display, opcode, ..
+                }) = &mut this.xi
+                {
+                    while unsafe { XPending(*display) } > 0 {
+                        if let Some(r) = smooth_scroll(*display, *opcode) {
+                            break 'out Poll::Ready(Some(r));
+                        }
+                    }
+                }
                 this.process = false;
             }
             match this.rx.try_recv() {
@@ -145,34 +354,44 @@ impl<T: AsFd + AsRawFd, F: Fd<T>> Stream for X11Stream<F, T> {
                     this.dc = true;
                     break Poll::Ready(None);
                 }
-                Err(TryRecvError::Empty) => match this.fd.poll_readable(cx) {
+                Err(TryRecvError::Empty) => match this.record_fd.poll_readable(cx) {
                     Poll::Ready(Ok(())) => {
                         this.process = true;
                     }
-                    v => break v.map(|r| Some(r.map(|_| unreachable!()).map_err(Into::into))),
+                    Poll::Ready(Err(e)) => break Poll::Ready(Some(Err(e.into()))),
+                    Poll::Pending => {
+                        if let Some(XIInfo { fd, .. }) = &this.xi {
+                            match fd.poll_readable(cx) {
+                                Poll::Ready(Ok(())) => {
+                                    this.process = true;
+                                }
+                                v => {
+                                    break v.map(|r| {
+                                        Some(r.map(|_| unreachable!()).map_err(Into::into))
+                                    });
+                                }
+                            }
+                        } else {
+                            break Poll::Pending;
+                        };
+                    }
                 },
             }
         }
     }
 }
 
-struct XRecordInterceptDataBox(&'static mut XRecordInterceptData);
-
-impl std::ops::Deref for XRecordInterceptDataBox {
-    type Target = XRecordInterceptData;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
+impl<T: AsFd + AsRawFd, F: Fd<T>> FusedStream for X11Stream<F, T> {
+    fn is_terminated(&self) -> bool {
+        self.dc
     }
 }
 
-impl std::ops::DerefMut for XRecordInterceptDataBox {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0
-    }
-}
+#[derive(Deref, DerefMut)]
+#[deref(forward)]
+struct XRecordDataBox(&'static mut XRecordInterceptData);
 
-impl Drop for XRecordInterceptDataBox {
+impl Drop for XRecordDataBox {
     fn drop(&mut self) {
         unsafe { XRecordFreeData(self.0 as *mut _) };
     }
@@ -180,8 +399,8 @@ impl Drop for XRecordInterceptDataBox {
 
 #[instrument(skip_all)]
 unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordInterceptData) {
-    let Closure { display, tx } = unsafe { &mut *(closure as *mut _) };
-    let data = XRecordInterceptDataBox(unsafe { &mut *data });
+    let Closure { xi2, display, tx } = unsafe { &mut *(closure as *mut _) };
+    let data = XRecordDataBox(unsafe { &mut *data });
     if data.category != XRecordFromServer {
         return;
     }
@@ -218,13 +437,17 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
             };
             let key = x11_key(keysym as c_uint);
 
-            let e = if category == KeyPress {
-                Event::KeyPress { key, keycode }
+            let state = if category == KeyPress {
+                ButtonState::Pressed
             } else {
-                Event::KeyRelease { key, keycode }
+                ButtonState::Released
             };
 
-            if let Err(error) = tx.send(Ok(e)) {
+            if let Err(error) = tx.send(Ok(Event::Key {
+                key,
+                keycode,
+                state,
+            })) {
                 error!(%error, "Failed to send event");
             }
         }
@@ -240,6 +463,26 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
                 x: root_x as i32,
                 y: root_y as i32,
             })) {
+                error!(%error, "Failed to send event");
+            }
+        }
+        ButtonPress | ButtonRelease => {
+            let event = match bytes[1] {
+                4..8 if *xi2 => return,
+                4 => Event::Scroll { dx: 0.0, dy: -1.0 },
+                5 => Event::Scroll { dx: 0.0, dy: 1.0 },
+                6 => Event::Scroll { dx: -1.0, dy: 0.0 },
+                7 => Event::Scroll { dx: 1.0, dy: 0.0 },
+                code => Event::Button {
+                    button: x11_button(code),
+                    state: if category == ButtonPress {
+                        ButtonState::Pressed
+                    } else {
+                        ButtonState::Released
+                    },
+                },
+            };
+            if let Err(error) = tx.send(Ok(event)) {
                 error!(%error, "Failed to send event");
             }
         }

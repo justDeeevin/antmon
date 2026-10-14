@@ -17,7 +17,7 @@ macro_rules! key_conv {
             use $crate::key::Key;
             match Key::Super {
                 $(Key::$key => {})*
-                Key::Unknown {..} => {}
+                Key::Unknown(_) => {}
             }
             match code {
                 $($p => Key::$key,)*

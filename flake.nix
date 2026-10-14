@@ -16,8 +16,8 @@
         overlays = [ (import rust-overlay) ];
       };
       dylibs = with pkgs; [
-        libx11.dev
-        libxi.dev
+        libx11
+        libxi
         libxtst
       ];
     in

@@ -1,3 +1,5 @@
+use std::ffi::c_uint;
+
 /// Convert native platform keycodes to [`Key`]s.
 pub mod convert;
 
@@ -147,5 +149,5 @@ pub enum PlatformKey {
         /// `KeyCode` struct, so this feels more correct.
         u16,
     ),
-    X11(std::ffi::c_uint),
+    X11(c_uint),
 }

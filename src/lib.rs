@@ -5,10 +5,19 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::listen;
 
+/// Mouse buttons.
+pub mod button;
 /// Keyboard keys.
 pub mod key;
 
+pub use button::Button;
 pub use key::Key;
+
+#[derive(Debug)]
+pub enum ButtonState {
+    Pressed,
+    Released,
+}
 
 /// An input event.
 #[derive(Debug)]
@@ -19,19 +28,27 @@ pub enum Event {
     ///
     /// [^1]: If the program is listening to an XWayland server, the "root window"
     /// isn't the entire screen, but rather a bounding box around all windows.
-    Motion { x: i32, y: i32 },
-    /// A keyboard key was pressed.
-    KeyPress {
+    Motion {
+        x: i32,
+        y: i32,
+    },
+    /// A keyboard key was pressed/released.
+    Key {
         key: Key,
         /// The position of the key on the keyboard, represented as the corresponding key on a
         /// QWERTY keyboard.
         keycode: Key,
+        state: ButtonState,
     },
-    /// A keyboard key was released.
-    KeyRelease {
-        key: Key,
-        /// See [`KeyPress::keycode`](Event::KeyPress::keycode).
-        keycode: Key,
+    /// A mouse button was pressed/released.
+    Button {
+        button: Button,
+        /// The position of the button on the screen.
+        state: ButtonState,
+    },
+    Scroll {
+        dx: f64,
+        dy: f64,
     },
 }
 
