@@ -35,8 +35,7 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
     // This is the display that XRecord hijacks in order to listen to events. It is used with
     // EnableContext and ProcessReplies. Its file descriptor is used to poll for events.
     let data_display = unsafe { XOpenDisplay(null()) };
-    let xi_display = unsafe { XOpenDisplay(null()) };
-    if data_display.is_null() || control_display.is_null() || xi_display.is_null() {
+    if data_display.is_null() || control_display.is_null() {
         return Err(ListenError::Platform);
     }
 
@@ -74,7 +73,7 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
     let mut xi_opcode = MaybeUninit::uninit();
     let xi2 = unsafe {
         XQueryExtension(
-            xi_display,
+            control_display,
             c"XInputExtension".as_ptr(),
             xi_opcode.as_mut_ptr(),
             MaybeUninit::uninit().as_mut_ptr(),
@@ -85,7 +84,9 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
             let mut major = 2;
             let mut minor = 3;
 
-            match unsafe { XIQueryVersion(xi_display, &raw mut major, &raw mut minor) } as c_uchar {
+            match unsafe { XIQueryVersion(control_display, &raw mut major, &raw mut minor) }
+                as c_uchar
+            {
                 Success => true,
                 BadRequest => false,
                 _ => return Err(ListenError::Platform),
@@ -121,7 +122,7 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
     }
 
     let xi = if xi2 {
-        let window = unsafe { XDefaultRootWindow(xi_display) };
+        let window = unsafe { XDefaultRootWindow(control_display) };
         let mut mask = [0; (max(XI_RawMotion, XI_DeviceChanged) as usize).div_ceil(8)];
         XISetMask(&mut mask, XI_RawMotion);
         XISetMask(&mut mask, XI_DeviceChanged);
@@ -131,19 +132,18 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
             mask_len: mask.len() as c_int,
             mask: mask.as_mut_ptr(),
         };
-        if unsafe { XISelectEvents(xi_display, window, &raw mut event_mask, 1) } != Success as c_int
+        if unsafe { XISelectEvents(control_display, window, &raw mut event_mask, 1) }
+            != Success as c_int
         {
             return Err(ListenError::Platform);
         }
 
         Some(XIInfo {
-            display: xi_display,
-            fd: Rt::Fd::new(unsafe { BorrowedFd::borrow_raw(XConnectionNumber(xi_display)) })?,
+            fd: Rt::Fd::new(unsafe { BorrowedFd::borrow_raw(XConnectionNumber(control_display)) })?,
             opcode: unsafe { xi_opcode.assume_init() },
             scroll_info: HashMap::default(),
         })
     } else {
-        unsafe { XCloseDisplay(xi_display) };
         None
     };
 
@@ -175,7 +175,6 @@ struct X11Stream<F, I> {
 
 struct XIInfo<F> {
     fd: F,
-    display: *mut Display,
     opcode: c_int,
     scroll_info: HashMap<c_int, (XIScrollClassInfo, XIScrollClassInfo)>,
 }
@@ -193,9 +192,6 @@ impl<F, I> Drop for X11Stream<F, I> {
 
             XCloseDisplay(self.data_display);
             XCloseDisplay(control_display);
-            if let Some(XIInfo { display, .. }) = &self.xi {
-                XCloseDisplay(*display);
-            }
         }
     }
 }
@@ -354,20 +350,20 @@ impl<T: AsFd + AsRawFd, F: Fd<T>> Stream for X11Stream<F, T> {
         if self.dc {
             return Poll::Ready(None);
         }
+        let control_display = unsafe { (*self.closure).display };
         let this = unsafe { self.get_unchecked_mut() };
 
         'out: loop {
             if this.process {
                 unsafe { XRecordProcessReplies(this.data_display) };
                 if let Some(XIInfo {
-                    display,
                     opcode,
                     scroll_info,
                     ..
                 }) = &mut this.xi
                 {
-                    while unsafe { XPending(*display) } > 0 {
-                        if let Some(r) = smooth_scroll(*display, *opcode, scroll_info) {
+                    while unsafe { XPending(control_display) } > 0 {
+                        if let Some(r) = smooth_scroll(control_display, *opcode, scroll_info) {
                             break 'out Poll::Ready(Some(r));
                         }
                     }
