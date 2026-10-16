@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 use crate::{
     ButtonState, Event, EventError, ListenError,
     button::convert::x11_button,
@@ -7,6 +9,7 @@ use byor::fd::{Fd, RuntimeFd};
 use derive_more::{Deref, DerefMut};
 use futures_core::{FusedStream, Stream};
 use std::{
+    collections::HashMap,
     ffi::*,
     marker::PhantomData,
     mem::MaybeUninit,
@@ -82,7 +85,6 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
             let mut major = 2;
             let mut minor = 3;
 
-            #[allow(non_upper_case_globals)]
             match unsafe { XIQueryVersion(xi_display, &raw mut major, &raw mut minor) } as c_uchar {
                 Success => true,
                 BadRequest => false,
@@ -114,10 +116,15 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
     let record_fd =
         Rt::Fd::new(unsafe { BorrowedFd::borrow_raw(XConnectionNumber(data_display)) })?;
 
+    const fn max(a: i32, b: i32) -> i32 {
+        if a > b { a } else { b }
+    }
+
     let xi = if xi2 {
         let window = unsafe { XDefaultRootWindow(xi_display) };
-        let mut mask = [0; (XI_RawMotion as usize).div_ceil(8)];
+        let mut mask = [0; (max(XI_RawMotion, XI_DeviceChanged) as usize).div_ceil(8)];
         XISetMask(&mut mask, XI_RawMotion);
+        XISetMask(&mut mask, XI_DeviceChanged);
 
         let mut event_mask = XIEventMask {
             deviceid: XIAllMasterDevices,
@@ -133,6 +140,7 @@ pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
             display: xi_display,
             fd: Rt::Fd::new(unsafe { BorrowedFd::borrow_raw(XConnectionNumber(xi_display)) })?,
             opcode: unsafe { xi_opcode.assume_init() },
+            scroll_info: HashMap::default(),
         })
     } else {
         unsafe { XCloseDisplay(xi_display) };
@@ -169,6 +177,7 @@ struct XIInfo<F> {
     fd: F,
     display: *mut Display,
     opcode: c_int,
+    scroll_info: HashMap<c_int, (XIScrollClassInfo, XIScrollClassInfo)>,
 }
 
 impl<F, I> Drop for X11Stream<F, I> {
@@ -239,7 +248,11 @@ impl<T> Drop for XEventDataBox<T> {
 
 /// <div class="warning">This function may block. Make sure to check that there is pending data with
 /// <code>XPending</code> before calling.</div>
-fn smooth_scroll(display: *mut Display, opcode: c_int) -> Option<Result<Event>> {
+fn smooth_scroll(
+    display: *mut Display,
+    opcode: c_int,
+    scroll_info: &mut HashMap<c_int, (XIScrollClassInfo, XIScrollClassInfo)>,
+) -> Option<Result<Event>> {
     let mut event = MaybeUninit::uninit();
     unsafe { XNextEvent(display, event.as_mut_ptr()) };
     let mut event = unsafe { event.assume_init() };
@@ -252,8 +265,15 @@ fn smooth_scroll(display: *mut Display, opcode: c_int) -> Option<Result<Event>> 
     if unsafe { XGetEventData(display, &raw mut event.generic_event_cookie) } != True {
         return Some(Err(EventError::GetState));
     }
-    if unsafe { &event.generic_event_cookie }.evtype != XI_RawMotion {
-        return None;
+    match unsafe { &event.generic_event_cookie }.evtype {
+        XI_RawMotion => {}
+        XI_DeviceChanged => {
+            let event = unsafe {
+                XEventDataBox::<XIDeviceChangedEvent>::new(display, event.generic_event_cookie)
+            };
+            scroll_info.remove(&event.sourceid);
+        }
+        _ => return None,
     }
 
     let event = unsafe { XEventDataBox::<XIRawEvent>::new(display, event.generic_event_cookie) };
@@ -265,28 +285,31 @@ fn smooth_scroll(display: *mut Display, opcode: c_int) -> Option<Result<Event>> 
         n_devices == 1,
         "XIQueryDevice returned more than one device"
     );
-    let classes = unsafe {
-        std::slice::from_raw_parts_mut(device_info.classes, device_info.num_classes as usize)
-    };
 
-    fn get_axis_info(
-        scroll_type: c_int,
-        classes: &[*mut XIAnyClassInfo],
-    ) -> Option<&XIScrollClassInfo> {
-        classes.iter().find_map(|class| {
-            if unsafe { (**class)._type } == XIScrollClass {
-                let info = unsafe { &*(*class as *mut XIScrollClassInfo) };
-                if info.scroll_type == scroll_type {
-                    return Some(info);
+    let (vertical, horizontal) = match scroll_info.get(&event.sourceid) {
+        Some(info) => Some(info),
+        None => {
+            let mut vertical = None;
+            let mut horizontal = None;
+            for class in unsafe {
+                std::slice::from_raw_parts(device_info.classes, device_info.num_classes as usize)
+            } {
+                if unsafe { (**class)._type } == XIScrollClass {
+                    if vertical.is_some() && horizontal.is_some() {
+                        break;
+                    }
+                    let info = unsafe { *(*class as *mut XIScrollClassInfo) };
+                    if info.scroll_type == XIScrollTypeVertical {
+                        vertical = Some(info);
+                    } else if info.scroll_type == XIScrollTypeHorizontal {
+                        horizontal = Some(info);
+                    }
                 }
             }
-
-            None
-        })
-    }
-
-    let vertical = get_axis_info(XIScrollTypeVertical, classes)?;
-    let horizontal = get_axis_info(XIScrollTypeHorizontal, classes)?;
+            scroll_info.insert(event.sourceid, (vertical?, horizontal?));
+            scroll_info.get(&event.sourceid)
+        }
+    }?;
 
     let mask = unsafe {
         std::slice::from_raw_parts(event.valuators.mask, event.valuators.mask_len as usize)
@@ -337,11 +360,14 @@ impl<T: AsFd + AsRawFd, F: Fd<T>> Stream for X11Stream<F, T> {
             if this.process {
                 unsafe { XRecordProcessReplies(this.data_display) };
                 if let Some(XIInfo {
-                    display, opcode, ..
+                    display,
+                    opcode,
+                    scroll_info,
+                    ..
                 }) = &mut this.xi
                 {
                     while unsafe { XPending(*display) } > 0 {
-                        if let Some(r) = smooth_scroll(*display, *opcode) {
+                        if let Some(r) = smooth_scroll(*display, *opcode, scroll_info) {
                             break 'out Poll::Ready(Some(r));
                         }
                     }
@@ -411,7 +437,6 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
     let category = bytes[0] as c_int;
     let raw_keycode = bytes[1];
 
-    #[allow(non_upper_case_globals)]
     match category {
         KeyPress | KeyRelease => {
             let keycode = linux_keycode(raw_keycode as u16 - 8);
