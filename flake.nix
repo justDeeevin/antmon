@@ -19,6 +19,7 @@
         libx11
         libxi
         libxtst
+        libxkbcommon
       ];
     in
     {

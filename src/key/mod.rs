@@ -1,9 +1,10 @@
+use derive_more::Debug;
 use std::ffi::c_uint;
 
 /// Convert native platform keycodes to [`Key`]s.
 pub mod convert;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 /// A keyboard key.
 pub enum Key {
     Escape,
@@ -137,7 +138,7 @@ pub enum Key {
     // See https://docs.qmk.fm/keycodes_basic
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 /// A platform-specific keycode.
 ///
 /// Consumers will usually only encounter the variant corresponding to the platform on which the program
@@ -147,7 +148,8 @@ pub enum PlatformKey {
     Linux(
         /// It might be more accurate to use `u8`, but the evdev crate holds a `u16` inside of its
         /// `KeyCode` struct, so this feels more correct.
+        #[debug("0x{_0:x}")]
         u16,
     ),
-    X11(c_uint),
+    X11(#[debug("0x{_0:x}")] c_uint),
 }

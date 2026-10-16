@@ -36,3 +36,18 @@ button_conv! {
         9 | 11 => Forward,
     }
 }
+
+button_conv! {
+    pub linux_button(Linux: u16) {
+        // BTN_LEFT
+        0x110 => Left,
+        // BTN_RIGHT
+        0x111 => Right,
+        // BTN_MIDDLE
+        0x112 => Middle,
+        // BTN_SIDE or BTN_BACK
+        0x113 | 0x116 => Back,
+        // BTN_EXTRA or BTN_FORWARD
+        0x114 | 0x115 => Forward,
+    }
+}

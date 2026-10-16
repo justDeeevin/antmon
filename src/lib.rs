@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 #[cfg(target_os = "linux")]
-mod linux;
+pub mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::listen;
 
@@ -13,7 +13,7 @@ pub mod key;
 pub use button::Button;
 pub use key::Key;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ButtonState {
     Pressed,
     Released,

@@ -6,21 +6,25 @@ edition = "2024"
 [dependencies]
 x11 = "2.21.0"
 futures-core = "0.3.34"
-byor = { version = "2.0.1", default-features = false }
+byor = { version = "3.0.0", default-features = false }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 async-stream = "0.3.6"
+derive_more = { version = "2.1.1", features = ["debug"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
-byor = { version = "2.0.1", default-features = false, features = ["fd"] }
+byor = { version = "3.0.0", default-features = false, features = ["fd", "fs"] }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
+evdev = "0.13.2"
+async-stream = "0.3.6"
+futures-util = "0.3.34"
+inotify = { version = "0.11.5", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["rt", "macros"] }
 smol = "2.0.2"
-futures-util = "0.3.34"
-byor = { version = "2.0.1", default-features = false, features = [
+byor = { version = "3.0.0", default-features = false, features = [
 	"tokio",
 	"smol",
 ] }
