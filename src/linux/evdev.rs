@@ -173,13 +173,22 @@ fn make_event(e: InputEvent, hires: &mut bool, cursor: &mut Cursor) -> Option<Ev
             } else {
                 ButtonState::Released
             };
-            const BTN_0: u16 = KeyCode::BTN_0.0;
-            const BTN_TRIGGER: u16 = KeyCode::BTN_TRIGGER.0;
+            macro_rules! literal_keycode_const {
+                ($name:ident) => {
+                    const $name: u16 = KeyCode::$name.0;
+                };
+            }
+            literal_keycode_const!(BTN_0);
+            literal_keycode_const!(KEY_OK);
+            literal_keycode_const!(BTN_TRIGGER_HAPPY1);
+            literal_keycode_const!(BTN_TRIGGER_HAPPY40);
             match keycode.0 {
-                button @ BTN_0..BTN_TRIGGER => Event::Button {
-                    button: linux_button(button),
-                    state,
-                },
+                button @ (BTN_0..KEY_OK | BTN_TRIGGER_HAPPY1..=BTN_TRIGGER_HAPPY40) => {
+                    Event::Button {
+                        button: linux_button(button),
+                        state,
+                    }
+                }
                 keycode => {
                     let keycode = linux_keycode(keycode);
                     Event::Key {
