@@ -153,7 +153,7 @@ key_conv! {
 key_conv! {
     ///
     /// Takes a raw evdev keycode. Uses the same semantics as `Event`'s
-    /// [`keycode`](crate::Event::KeyPress::keycode) field.
+    /// [`keycode`](crate::Event::Key::keycode) field.
     pub linux_keycode(Linux: u16) {
         // Values from https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
         1 => Escape,
