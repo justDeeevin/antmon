@@ -1,9 +1,14 @@
 #![allow(non_upper_case_globals)]
 
+//! X11 input events.
+//!
+//! This module uses the XRecord extension to monitor core input events. If the server supports it,
+//! it will also monitor XInput2 smooth scroll state.
+
 use crate::{
     ButtonState, Event, EventError, ListenError,
     button::convert::x11_button,
-    key::convert::{linux_keycode, x11_key},
+    key::convert::{from_keysym, linux_keycode},
 };
 use byor::fd::{Fd, RuntimeFd};
 use derive_more::{Deref, DerefMut};
@@ -30,7 +35,7 @@ struct Closure {
     tx: Sender<Result<Event>>,
 }
 
-pub fn listen<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>, ListenError> {
+pub fn events<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>, ListenError> {
     let control_display = unsafe { XOpenDisplay(null()) };
     // This is the display that XRecord hijacks in order to listen to events. It is used with
     // EnableContext and ProcessReplies. Its file descriptor is used to poll for events.
@@ -456,7 +461,7 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
                     /*level:*/ 1,
                 )
             };
-            let key = x11_key(keysym as c_uint);
+            let key = from_keysym(keysym as c_uint);
 
             let state = if category == KeyPress {
                 ButtonState::Pressed

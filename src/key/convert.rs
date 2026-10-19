@@ -30,9 +30,7 @@ macro_rules! key_conv {
 
 key_conv! {
     #[allow(non_upper_case_globals)]
-    ///
-    /// Takes a keysym.
-    pub x11_key(X11: c_uint) {
+    pub from_keysym(X11: c_uint) {
         XK_Escape => Escape,
         XK_F1 => F1,
         XK_F2 => F2,
@@ -152,8 +150,8 @@ key_conv! {
 }
 key_conv! {
     ///
-    /// Takes a raw evdev keycode. Uses the same semantics as `Event`'s
-    /// [`keycode`](crate::Event::Key::keycode) field.
+    /// Takes a raw evdev keycode. Uses the same semantics as
+    /// [`Event::Key::keycode`](crate::Event::Key::keycode).
     pub linux_keycode(Linux: u16) {
         // Values from https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
         1 => Escape,

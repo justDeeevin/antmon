@@ -145,11 +145,6 @@ pub enum Key {
 /// is running. However, the [`convert`] functions allow for semantic operations outside of the host
 /// platform, so each variant must be accounted for.
 pub enum PlatformKey {
-    Linux(
-        /// It might be more accurate to use `u8`, but the evdev crate holds a `u16` inside of its
-        /// `KeyCode` struct, so this feels more correct.
-        #[debug("0x{_0:x}")]
-        u16,
-    ),
+    Linux(#[debug("0x{_0:x}")] u16),
     X11(#[debug("0x{_0:x}")] c_uint),
 }

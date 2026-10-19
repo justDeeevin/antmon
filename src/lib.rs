@@ -3,7 +3,7 @@
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::listen;
+pub use linux::events;
 
 /// Mouse buttons.
 pub mod button;
@@ -14,6 +14,7 @@ pub use button::Button;
 pub use key::Key;
 
 #[derive(Debug, PartialEq, Eq)]
+/// Whether a button is pressed or released.
 pub enum ButtonState {
     Pressed,
     Released,
@@ -43,7 +44,6 @@ pub enum Event {
     /// A mouse button was pressed/released.
     Button {
         button: Button,
-        /// The position of the button on the screen.
         state: ButtonState,
     },
     Scroll {
@@ -76,6 +76,4 @@ pub enum ListenError {
         #[source]
         std::io::Error,
     ),
-    #[error("No graphical session detected")]
-    NoSession,
 }
