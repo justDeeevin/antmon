@@ -13,7 +13,7 @@ pub mod key;
 pub use button::Button;
 pub use key::Key;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 /// Whether a button is pressed or released.
 pub enum ButtonState {
     Pressed,

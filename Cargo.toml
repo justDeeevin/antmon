@@ -13,13 +13,21 @@ async-stream = "0.3.6"
 derive_more = { version = "2.1.1", features = ["debug"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
 byor = { version = "3.0.0", default-features = false, features = ["fd", "fs"] }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
+
+x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
+
 evdev = "0.13.2"
 async-stream = "0.3.6"
 futures-util = "0.3.34"
 inotify = { version = "0.11.5", default-features = false }
+
+wayland-client = "0.31.15"
+xkbcommon = "0.9.0"
+memmap2 = "0.9.12"
+wayland-protocols = { version = "0.32.13", features = ["client", "unstable"] }
+
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["rt", "macros"] }

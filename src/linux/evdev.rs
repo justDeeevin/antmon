@@ -1,16 +1,14 @@
 //! Raw device events.
 //!
 //! This module uses [`evdev`] to read from `/dev/input`. Because it lacks any context from a
-//! display server, it only produces keycodes[^1] and relative mouse motion[^2].
+//! display server, it only produces keycodes[^1] and tracks its own absolute cursor position.
 //!
-//! In addition to only producing mouse deltas, evdev mouse events are only provided in a single axis at a
-//! time. In order to reduce noise, antmon's stream groups each pair of events. This is based on the
-//! assumption that every motion event moves in both axes by some amount. While this is not always
-//! true, it is very rarely false, and when it is, the error is very small.
+//! Evdev mouse events are only provided in a single axis at a time. In order to reduce noise,
+//! antmon's stream groups each pair of events. This is based on the assumption that every motion
+//! event moves in both axes by some amount. While this is not always true, it is very rarely false,
+//! and when it is, the error is very small.
 //!
 //! [^1]: Both the `key` and `keycode` fields of [`Event::Key`] are the same.
-//! [^2]: The `x` and `y` fields of [`Event::Motion`] represent how far the cursor moved rather than
-//! where it is on the screen.
 
 use crate::{
     ButtonState, Event, EventError, ListenError, button::convert::linux_button,
