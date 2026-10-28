@@ -150,7 +150,7 @@ key_conv! {
 }
 key_conv! {
     ///
-    /// Takes a raw evdev keycode. Uses the same semantics as
+    /// Uses the same semantics as
     /// [`Event::Key::keycode`](crate::Event::Key::keycode).
     pub linux_keycode(Linux: u16) {
         // Values from https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h

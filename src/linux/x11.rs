@@ -6,7 +6,7 @@
 //! it will also monitor XInput2 smooth scroll state.
 
 use crate::{
-    ButtonState, Event, EventError, ListenError,
+    ButtonState, Event, EventError, ListenError, ScrollUnit,
     button::convert::x11_button,
     key::convert::{from_keysym, linux_keycode},
 };
@@ -336,6 +336,7 @@ fn smooth_scroll(
     };
 
     Some(Ok(Event::Scroll {
+        unit: ScrollUnit::Detent,
         dx: valuator(horizontal.number as usize)
             .map(|v| v / horizontal.increment)
             .unwrap_or_default(),
@@ -495,10 +496,26 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
         ButtonPress | ButtonRelease => {
             let event = match bytes[1] {
                 4..8 if *xi2 => return,
-                4 => Event::Scroll { dx: 0.0, dy: -1.0 },
-                5 => Event::Scroll { dx: 0.0, dy: 1.0 },
-                6 => Event::Scroll { dx: -1.0, dy: 0.0 },
-                7 => Event::Scroll { dx: 1.0, dy: 0.0 },
+                4 => Event::Scroll {
+                    unit: ScrollUnit::Detent,
+                    dx: 0.0,
+                    dy: -1.0,
+                },
+                5 => Event::Scroll {
+                    unit: ScrollUnit::Detent,
+                    dx: 0.0,
+                    dy: 1.0,
+                },
+                6 => Event::Scroll {
+                    unit: ScrollUnit::Detent,
+                    dx: -1.0,
+                    dy: 0.0,
+                },
+                7 => Event::Scroll {
+                    unit: ScrollUnit::Detent,
+                    dx: 1.0,
+                    dy: 0.0,
+                },
                 code => Event::Button {
                     button: x11_button(code),
                     state: if category == ButtonPress {

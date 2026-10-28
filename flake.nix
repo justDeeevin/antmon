@@ -20,6 +20,9 @@
         libxi
         libxtst
         libxkbcommon
+
+        libudev-zero
+        libinput
       ];
     in
     {

@@ -47,9 +47,17 @@ pub enum Event {
         state: ButtonState,
     },
     Scroll {
+        unit: ScrollUnit,
         dx: f64,
         dy: f64,
     },
+}
+
+#[derive(Debug)]
+/// Whether a scroll event is in units of mouse wheel detents (or "clicks") or logical pixels.
+pub enum ScrollUnit {
+    Detent,
+    Pixel,
 }
 
 #[derive(thiserror::Error, Debug)]

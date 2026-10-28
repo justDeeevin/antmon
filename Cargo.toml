@@ -18,7 +18,7 @@ derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
 
 x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
 
-evdev = "0.13.2"
+input = "0.10.0"
 async-stream = "0.3.6"
 futures-util = "0.3.34"
 inotify = { version = "0.11.5", default-features = false }
