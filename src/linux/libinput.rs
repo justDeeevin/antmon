@@ -5,7 +5,10 @@
 //!
 //! [^1]: Both the `key` and `keycode` fields of [`Event::Key`] are the same.
 
-use crate::{ButtonState, Event, EventError, ListenError, ScrollUnit, key::convert::linux_keycode};
+use crate::{
+    ButtonState, Event, EventError, ListenError, ScrollUnit, button::convert::linux_button,
+    key::convert::linux_keycode,
+};
 use byor::{
     fd::{Fd, RuntimeFd},
     fs::{DirEntry, RuntimeFs},
@@ -143,6 +146,16 @@ impl From<KeyState> for ButtonState {
     }
 }
 
+impl From<input::event::pointer::ButtonState> for ButtonState {
+    fn from(value: input::event::pointer::ButtonState) -> Self {
+        use input::event::pointer::ButtonState::*;
+        match value {
+            Pressed => ButtonState::Pressed,
+            Released => ButtonState::Released,
+        }
+    }
+}
+
 fn get_libinput_events(
     libinput: &mut Libinput,
     (x, y): (&mut f64, &mut f64),
@@ -156,6 +169,10 @@ fn get_libinput_events(
                 state: event.key_state().into(),
             })
         }
+        input::Event::Pointer(PointerEvent::Button(e)) => Some(Event::Button {
+            button: linux_button(e.button() as u16),
+            state: e.button_state().into(),
+        }),
         input::Event::Pointer(PointerEvent::Motion(event)) => {
             *x += event.dx();
             *y += event.dy();
