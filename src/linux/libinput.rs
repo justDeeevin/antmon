@@ -17,7 +17,7 @@ use futures_core::FusedStream;
 use futures_util::{FutureExt, StreamExt};
 use inotify::{EventMask, Inotify, WatchMask};
 use input::{
-    Device, DeviceCapability, Libinput, LibinputInterface,
+    ClickMethod, Device, DeviceCapability, Libinput, LibinputInterface, ScrollMethod,
     event::{
         PointerEvent,
         keyboard::{KeyState, KeyboardEventTrait},
@@ -53,15 +53,20 @@ impl LibinputInterface for Interface {
 
 type Result<T, E = EventError> = std::result::Result<T, E>;
 
-fn filter_map<Entry: DirEntry>(libinput: &mut Libinput, entry: Entry) -> Option<(PathBuf, Device)> {
+fn open_device<Entry: DirEntry>(
+    libinput: &mut Libinput,
+    entry: Entry,
+) -> Option<(PathBuf, Device)> {
     let path = entry.path();
-    let device = libinput.path_add_device(&path.display().to_string())?;
+    let mut device = libinput.path_add_device(&path.display().to_string())?;
     if !device.has_capability(DeviceCapability::Keyboard)
         && !device.has_capability(DeviceCapability::Pointer)
     {
         libinput.path_remove_device(device);
         None
     } else {
+        let _ = device.config_scroll_set_method(ScrollMethod::TwoFinger);
+        let _ = device.config_click_set_method(ClickMethod::Clickfinger);
         Some((path, device))
     }
 }
@@ -79,7 +84,7 @@ pub async fn events<Rt: RuntimeFd + RuntimeFs>()
                 Some(e)
             }
         })
-        .filter_map(|e| std::future::ready(filter_map(&mut libinput, e)))
+        .filter_map(|e| std::future::ready(open_device(&mut libinput, e)))
         .collect::<HashMap<_, _>>()
         .await;
 
