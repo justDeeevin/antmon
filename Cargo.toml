@@ -20,7 +20,7 @@ derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
 x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
 
 input = { version = "0.10.0", default-features = false, features = [
-	"libinput_1_30",
+	"libinput_1_19",
 ] }
 async-stream = "0.3.6"
 futures-util = "0.3.34"

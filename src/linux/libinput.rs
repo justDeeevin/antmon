@@ -3,6 +3,9 @@
 //! This module uses [`libinput`](input) to read from `/dev/input`. Because it lacks any context
 //! from a display server, it only produces keycodes[^1] and tracks its own absolute cursor position.
 //!
+//! Touchpad input is configured to use the [`Clickfinger`](ClickMethod::Clickfinger) click method
+//! and the [`TwoFinger`](ScrollMethod::TwoFinger) scroll method by default.
+//!
 //! [^1]: Both the `key` and `keycode` fields of [`Event::Key`] are the same.
 
 use crate::{

@@ -19,8 +19,8 @@
         libx11
         libxi
         libxtst
-        libxkbcommon
 
+        libxkbcommon
         libinput
       ];
     in
