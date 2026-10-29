@@ -1,5 +1,5 @@
 use derive_more::Debug;
-use std::ffi::c_uint;
+use xkeysym::Keysym;
 
 /// Convert native platform keycodes to [`Key`]s.
 pub mod convert;
@@ -147,5 +147,5 @@ pub enum Key {
 /// platform, so each variant must be accounted for.
 pub enum PlatformKey {
     Linux(#[debug("0x{_0:x}")] u16),
-    X11(#[debug("0x{_0:x}")] c_uint),
+    X11(#[debug("0x{:x}", _0.raw())] Keysym),
 }

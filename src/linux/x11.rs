@@ -25,6 +25,7 @@ use std::{
 };
 use tracing::{error, instrument};
 use x11::{xinput2::*, xlib::*, xrecord::*};
+use xkeysym::Keysym;
 
 type Result<T, E = EventError> = std::result::Result<T, E>;
 
@@ -462,7 +463,7 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
                     /*level:*/ 1,
                 )
             };
-            let key = from_keysym(keysym as c_uint);
+            let key = from_keysym(Keysym::new(keysym as u32));
 
             let state = if category == KeyPress {
                 ButtonState::Pressed

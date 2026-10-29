@@ -291,7 +291,7 @@ pub async fn events<Rt: RuntimeFd + RuntimeFs>()
                 ..
             } => {
                 let xkb_keycode = xkb::Keycode::from(into_keycode(keycode)? + 8);
-                let key = from_keysym(state.key_get_one_sym(xkb_keycode).into());
+                let key = from_keysym(state.key_get_one_sym(xkb_keycode));
 
                 state.update_key(xkb_keycode, key_state.into());
 
