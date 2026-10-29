@@ -18,7 +18,7 @@ use std::{
     ffi::*,
     marker::PhantomData,
     mem::MaybeUninit,
-    os::fd::{AsFd, AsRawFd, BorrowedFd},
+    os::fd::BorrowedFd,
     ptr::null,
     sync::mpsc::{Receiver, Sender, TryRecvError, channel},
     task::Poll,
@@ -157,7 +157,6 @@ pub fn events<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
         rx,
         record_fd,
         xi,
-        _marker: PhantomData,
         data_display,
         closure,
         context,
@@ -166,11 +165,10 @@ pub fn events<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
     })
 }
 
-struct X11Stream<F, I> {
+struct X11Stream<F> {
     rx: Receiver<Result<Event>>,
     record_fd: F,
     xi: Option<XIInfo<F>>,
-    _marker: PhantomData<I>,
     data_display: *mut Display,
     // Can't hold a Box because it would violate aliasing rules.
     closure: *mut Closure,
@@ -185,7 +183,7 @@ struct XIInfo<F> {
     scroll_info: HashMap<c_int, (XIScrollClassInfo, XIScrollClassInfo)>,
 }
 
-impl<F, I> Drop for X11Stream<F, I> {
+impl<F> Drop for X11Stream<F> {
     fn drop(&mut self) {
         let control_display = unsafe { (*self.closure).display };
         unsafe {
@@ -347,7 +345,7 @@ fn smooth_scroll(
     }))
 }
 
-impl<T: AsFd + AsRawFd, F: Fd<T>> Stream for X11Stream<F, T> {
+impl<F: Fd> Stream for X11Stream<F> {
     type Item = Result<Event>;
 
     fn poll_next(
@@ -410,7 +408,7 @@ impl<T: AsFd + AsRawFd, F: Fd<T>> Stream for X11Stream<F, T> {
     }
 }
 
-impl<T: AsFd + AsRawFd, F: Fd<T>> FusedStream for X11Stream<F, T> {
+impl<F: Fd> FusedStream for X11Stream<F> {
     fn is_terminated(&self) -> bool {
         self.dc
     }
