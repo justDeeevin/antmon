@@ -18,6 +18,8 @@ use byor::{fd::RuntimeFd, fs::RuntimeFs};
 use futures_core::FusedStream;
 use std::pin::Pin;
 
+#[cfg(feature = "input-capture-portal")]
+pub mod input_capture_portal;
 pub mod libinput;
 pub mod wayland;
 pub mod x11;

@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "input-capture-portal", feature(return_type_notation))]
 #![doc = include_str!("../README.md")]
 
 #[cfg(target_os = "linux")]

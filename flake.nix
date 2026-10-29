@@ -29,7 +29,7 @@
         packages =
           with pkgs;
           [
-            (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
+            (pkgs.rust-bin.selectLatestNightlyWith (t: t.default))
             pkg-config
           ]
           ++ dylibs;
