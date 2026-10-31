@@ -200,6 +200,8 @@ dependencies = [
 [[package]]
 name = "byor"
 version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d1a0c5f818f0beae6de0210c6fc9bc0ac848b3ee296644fe8938e2a3ac4e649"
 dependencies = [
  "futures-core",
  "futures-io",

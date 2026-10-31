@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 x11 = "2.21.0"
 futures-core = "0.3.34"
-byor = { version = "4.0.0", default-features = false, path = "../byor" }
+byor = { version = "4.0.0", default-features = false }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 async-stream = "0.3.6"
@@ -14,10 +14,7 @@ derive_more = { version = "2.1.1", features = ["debug"] }
 xkeysym = "0.2.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-byor = { version = "4.0.0", default-features = false, features = [
-	"fd",
-	"fs",
-], path = "../byor" }
+byor = { version = "4.0.0", default-features = false, features = ["fd", "fs"] }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
 
 x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
@@ -41,4 +38,4 @@ smol = "2.0.2"
 byor = { version = "4.0.0", default-features = false, features = [
 	"tokio",
 	"smol",
-], path = "../byor" }
+] }
