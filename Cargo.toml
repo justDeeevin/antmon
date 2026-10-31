@@ -16,13 +16,13 @@ xkeysym = "0.2.1"
 [target.'cfg(target_os = "linux")'.dependencies]
 byor = { version = "4.0.0", default-features = false, features = ["fd", "fs"] }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
+pin-project = "1.1.13"
 
 x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
 
 input = { version = "0.10.0", default-features = false, features = [
 	"libinput_1_19",
 ] }
-pin-project = "1.1.13"
 futures-util = "0.3.34"
 inotify = { version = "0.11.5", default-features = false }
 

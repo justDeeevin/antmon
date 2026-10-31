@@ -4,7 +4,9 @@
 //! from a display server, it only produces keycodes[^1] and tracks its own absolute cursor position.
 //!
 //! Touchpad input is configured to use the [`Clickfinger`](ClickMethod::Clickfinger) click method
-//! and the [`TwoFinger`](ScrollMethod::TwoFinger) scroll method by default.
+//! and the [`TwoFinger`](ScrollMethod::TwoFinger) scroll method by default. You can use
+//! [`devices_mut`](LibinputStream::devices_mut) or
+//! [`devices_list_mut`](LibinputStream::devices_list_mut) to change this configuration per-device.
 //!
 //! Unfortunately, in order to implement the [`LibinputInterface`] trait, opening new device files is done
 //! synchronously. However, this only happens en masse on initialization and only happens
@@ -131,6 +133,40 @@ pub struct LibinputStream<F> {
     libinput: Libinput,
     cursor: (f64, f64),
     queued_events: VecDeque<Event>,
+}
+
+impl<F> LibinputStream<F> {
+    /// Get all of the devices that are currently plugged in.
+    pub fn devices(&self) -> &HashMap<PathBuf, Device> {
+        &self.devices
+    }
+
+    /// Get a list of all of the devices that are currently plugged in.
+    pub fn devices_list(&self) -> impl Iterator<Item = &Device> {
+        self.devices.values()
+    }
+
+    /// Get mutable access to all of the devices that are currently plugged in.
+    ///
+    /// This can be used to configure devices as desired.
+    ///
+    /// Note that this allocates a new map (though the keys and values are references to those owned
+    /// by the stream). If you don't need to look up devices by path, use
+    /// [`devices_list_mut`](Self::devices_list_mut) to save resources.
+    pub fn devices_mut(&mut self) -> HashMap<&Path, &mut Device> {
+        self.devices
+            .iter_mut()
+            .map(|(p, d)| (p.as_ref(), d))
+            .collect()
+    }
+
+    /// Get a list of mutable references to all of the devices that are
+    /// currently plugged in.
+    ///
+    /// This can be used to configure devices as desired.
+    pub fn devices_list_mut(&mut self) -> impl Iterator<Item = &mut Device> {
+        self.devices.values_mut()
+    }
 }
 
 impl<F: Fd> Stream for LibinputStream<F> {
