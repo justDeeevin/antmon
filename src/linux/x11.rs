@@ -15,7 +15,7 @@ use derive_more::{Deref, DerefMut};
 use futures_core::{FusedStream, Stream};
 use pin_project::{pin_project, pinned_drop};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::*,
     marker::PhantomData,
     mem::MaybeUninit,
@@ -36,6 +36,7 @@ struct Closure {
     xi2: bool,
     display: *mut Display,
     tx: Sender<Result<Event>>,
+    pressed: HashSet<u8>,
 }
 
 pub fn events<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>, ListenError> {
@@ -106,6 +107,7 @@ pub fn events<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
         xi2,
         display: control_display,
         tx,
+        pressed: HashSet::default(),
     }));
 
     if unsafe {
@@ -342,15 +344,22 @@ fn smooth_scroll(
         }
     };
 
-    Some(Ok(Event::Scroll {
-        unit: ScrollUnit::Detent,
-        dx: valuator(horizontal.number as usize)
-            .map(|v| v / horizontal.increment)
-            .unwrap_or_default(),
-        dy: valuator(vertical.number as usize)
-            .map(|v| v / vertical.increment)
-            .unwrap_or_default(),
-    }))
+    let dx = valuator(horizontal.number as usize)
+        .map(|v| v / horizontal.increment)
+        .unwrap_or_default();
+    let dy = valuator(vertical.number as usize)
+        .map(|v| v / vertical.increment)
+        .unwrap_or_default();
+
+    if dx == 0.0 && dy == 0.0 {
+        None
+    } else {
+        Some(Ok(Event::Scroll {
+            unit: ScrollUnit::Detent,
+            dx,
+            dy,
+        }))
+    }
 }
 
 impl<F: Fd> Stream for X11Stream<F> {
@@ -433,7 +442,12 @@ impl Drop for XRecordDataBox {
 
 #[instrument(skip_all)]
 unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordInterceptData) {
-    let Closure { xi2, display, tx } = unsafe { &mut *(closure as *mut _) };
+    let Closure {
+        xi2,
+        display,
+        tx,
+        pressed,
+    } = unsafe { &mut *(closure as *mut _) };
     let data = XRecordDataBox(unsafe { &mut *data });
     if data.category != XRecordFromServer {
         return;
@@ -447,11 +461,25 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
 
     match category {
         KeyPress | KeyRelease => {
+            let state = if category == KeyPress {
+                if !pressed.insert(raw_keycode) {
+                    return;
+                }
+                ButtonState::Pressed
+            } else {
+                pressed.remove(&raw_keycode);
+                ButtonState::Released
+            };
+
             let keycode = linux_keycode(raw_keycode as u16 - 8);
 
-            let mut state = MaybeUninit::uninit();
+            let mut kb_state = MaybeUninit::uninit();
             if unsafe {
-                XkbGetState(*display, 0x100 /*XkbUseCoreKbd*/, state.as_mut_ptr())
+                XkbGetState(
+                    *display,
+                    0x100, /*XkbUseCoreKbd*/
+                    kb_state.as_mut_ptr(),
+                )
             } != Success as c_int
             {
                 if let Err(error) = tx.send(Err(EventError::GetState)) {
@@ -464,17 +492,11 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
                 XkbKeycodeToKeysym(
                     *display,
                     raw_keycode,
-                    state.assume_init().group as c_int,
+                    kb_state.assume_init().group as c_int,
                     /*level:*/ 1,
                 )
             };
             let key = from_keysym(Keysym::new(keysym as u32));
-
-            let state = if category == KeyPress {
-                ButtonState::Pressed
-            } else {
-                ButtonState::Released
-            };
 
             if let Err(error) = tx.send(Ok(Event::Key {
                 key,
