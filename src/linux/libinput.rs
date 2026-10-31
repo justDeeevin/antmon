@@ -20,8 +20,8 @@ use byor::{
     fd::{Fd, RuntimeFd},
     fs::{DirEntry, RuntimeFs},
 };
-use futures_core::FusedStream;
-use futures_util::{FutureExt, StreamExt};
+use futures_core::{FusedStream, Stream};
+use futures_util::{StreamExt, ready};
 use inotify::{EventMask, Inotify, WatchMask};
 use input::{
     ClickMethod, Device, DeviceCapability, Libinput, LibinputInterface, ScrollMethod,
@@ -31,11 +31,17 @@ use input::{
         pointer::{Axis, PointerScrollEvent},
     },
 };
+use pin_project::pin_project;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fs::OpenOptions,
-    os::{fd::AsFd, unix::fs::OpenOptionsExt},
-    path::PathBuf,
+    io::ErrorKind,
+    os::{
+        fd::{AsFd, OwnedFd},
+        unix::fs::OpenOptionsExt,
+    },
+    path::{Path, PathBuf},
+    task::Poll,
 };
 use tracing::error;
 
@@ -79,9 +85,9 @@ fn open_device<Entry: DirEntry>(
 }
 
 pub async fn events<Rt: RuntimeFd + RuntimeFs>()
--> Result<impl FusedStream<Item = Result<Event>>, ListenError> {
+-> Result<LibinputStream<Rt::Fd<OwnedFd>>, ListenError> {
     let mut libinput = Libinput::new_from_path(Interface);
-    let mut devices = Rt::read_dir("/dev/input")
+    let devices = Rt::read_dir("/dev/input")
         .await?
         .filter_map(async |r| {
             let e = r.ok()?;
@@ -95,58 +101,163 @@ pub async fn events<Rt: RuntimeFd + RuntimeFs>()
         .collect::<HashMap<_, _>>()
         .await;
 
-    let mut inotify = Inotify::init()?;
+    let inotify = Inotify::init()?;
     inotify.watches().add(
         "/dev/input",
         WatchMask::CREATE | WatchMask::DELETE | WatchMask::ATTRIB,
     )?;
     let inotify_fd = Rt::Fd::new(inotify.as_fd().try_clone_to_owned()?)?;
     let libinput_fd = Rt::Fd::new(libinput.as_fd().try_clone_to_owned()?)?;
-    let [mut cursor_x, mut cursor_y] = [0.0; _];
 
-    Ok(async_stream::stream! {
+    Ok(LibinputStream {
+        devices,
+        inotify_fd,
+        inotify,
+        libinput_fd,
+        libinput,
+        cursor: (0.0, 0.0),
+        queued_events: VecDeque::default(),
+    })
+}
+
+#[pin_project]
+pub struct LibinputStream<F> {
+    devices: HashMap<PathBuf, Device>,
+    #[pin]
+    inotify_fd: F,
+    inotify: Inotify,
+    #[pin]
+    libinput_fd: F,
+    libinput: Libinput,
+    cursor: (f64, f64),
+    queued_events: VecDeque<Event>,
+}
+
+impl<F: Fd> Stream for LibinputStream<F> {
+    type Item = Result<Event>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        let mut out = this.queued_events.pop_front();
+
         loop {
-            futures_util::select! {
-                r = inotify_fd.readable().fuse() => {
-                    if let Err(error) = r {
-                        error!(%error, "Failed to poll inotify fd");
-                        yield Err(error.into());
-                        continue;
-                    }
+            match this.inotify_fd.poll_readable(cx) {
+                Poll::Ready(Ok(())) => {
                     let mut buf = [0; 1024];
                     loop {
-                        match inotify.read_events(&mut buf) {
-                            Ok(events) => handle_inotify_events(events, &mut libinput, &mut devices),
+                        match this.inotify.read_events(&mut buf) {
+                            Ok(events) => {
+                                for event in events {
+                                    if let Some(name) = event.name {
+                                        let path = PathBuf::from("/dev/input").join(name);
+                                        if !this.devices.contains_key(&path)
+                                            && (event.mask.contains(EventMask::CREATE)
+                                                || event.mask.contains(EventMask::ATTRIB))
+                                            && let Some(device) = this
+                                                .libinput
+                                                .path_add_device(&path.display().to_string())
+                                        {
+                                            this.devices.insert(path, device);
+                                        } else if event.mask.contains(EventMask::DELETE)
+                                            && let Some(device) = this.devices.remove(&path)
+                                        {
+                                            this.libinput.path_remove_device(device);
+                                        }
+                                    }
+                                }
+                            }
                             Err(error) => {
-                                if error.kind() == std::io::ErrorKind::WouldBlock {
+                                if error.kind() == ErrorKind::WouldBlock {
                                     break;
                                 } else {
                                     error!(%error, "Failed to read inotify events");
-                                    yield Err(error.into());
-                                    continue;
+                                    return Poll::Ready(Some(Err(error.into())));
                                 }
                             }
                         }
                     }
                 }
-                r = libinput_fd.readable().fuse() => {
-                    if let Err(error) = r {
-                        error!(%error, "Failed to poll libinput fd");
-                        yield Err(error.into());
-                        continue;
-                    }
-                    if let Err(error) = libinput.dispatch() {
-                        error!(%error, "Failed to get libinput events");
-                        yield Err(error.into());
-                        continue;
-                    }
-                    for event in get_libinput_events(&mut libinput, (&mut cursor_x, &mut cursor_y)) {
-                        yield Ok(event);
-                    }
+                Poll::Ready(Err(error)) => {
+                    error!(%error, "Failed to poll inotify fd");
+                    return Poll::Ready(Some(Err(error.into())));
                 }
+                Poll::Pending => {}
+            }
+
+            if let Err(error) = ready!(this.libinput_fd.poll_readable(cx)) {
+                error!(%error, "Failed to poll libinput fd");
+                return Poll::Ready(Some(Err(error.into())));
+            }
+
+            if let Err(error) = this.libinput.dispatch() {
+                error!(%error, "Failed to get libinput events");
+                return Poll::Ready(Some(Err(error.into())));
+            }
+
+            let mut events = this.libinput.filter_map(|e| match e {
+                input::Event::Keyboard(event) => {
+                    let keycode = linux_keycode(event.key() as u16);
+                    Some(Event::Key {
+                        keycode,
+                        key: keycode,
+                        state: event.key_state().into(),
+                    })
+                }
+                input::Event::Pointer(PointerEvent::Button(e)) => Some(Event::Button {
+                    button: linux_button(e.button() as u16),
+                    state: e.button_state().into(),
+                }),
+                input::Event::Pointer(PointerEvent::Motion(event)) => {
+                    this.cursor.0 += event.dx();
+                    this.cursor.1 += event.dy();
+                    Some(Event::Motion {
+                        x: this.cursor.0 as i32,
+                        y: this.cursor.1 as i32,
+                    })
+                }
+                input::Event::Pointer(PointerEvent::ScrollWheel(e)) => {
+                    let dx = if e.has_axis(Axis::Horizontal) {
+                        e.scroll_value_v120(Axis::Horizontal) / 120.0
+                    } else {
+                        0.0
+                    };
+                    let dy = if e.has_axis(Axis::Vertical) {
+                        e.scroll_value_v120(Axis::Vertical) / 120.0
+                    } else {
+                        0.0
+                    };
+                    Some(Event::Scroll {
+                        unit: ScrollUnit::Detent,
+                        dx,
+                        dy,
+                    })
+                }
+                input::Event::Pointer(PointerEvent::ScrollFinger(e)) => Some(e.into()),
+                input::Event::Pointer(PointerEvent::ScrollContinuous(e)) => Some(e.into()),
+                _ => None,
+            });
+
+            if out.is_none() {
+                out = events.next();
+            }
+
+            this.queued_events.extend(events);
+
+            if out.is_some() {
+                return Poll::Ready(out.map(Ok));
             }
         }
-    })
+    }
+}
+
+impl<F: Fd> FusedStream for LibinputStream<F> {
+    fn is_terminated(&self) -> bool {
+        false
+    }
 }
 
 impl From<KeyState> for ButtonState {
@@ -168,54 +279,6 @@ impl From<input::event::pointer::ButtonState> for ButtonState {
     }
 }
 
-fn get_libinput_events(
-    libinput: &mut Libinput,
-    (x, y): (&mut f64, &mut f64),
-) -> impl Iterator<Item = Event> {
-    libinput.filter_map(|e| match e {
-        input::Event::Keyboard(event) => {
-            let keycode = linux_keycode(event.key() as u16);
-            Some(Event::Key {
-                keycode,
-                key: keycode,
-                state: event.key_state().into(),
-            })
-        }
-        input::Event::Pointer(PointerEvent::Button(e)) => Some(Event::Button {
-            button: linux_button(e.button() as u16),
-            state: e.button_state().into(),
-        }),
-        input::Event::Pointer(PointerEvent::Motion(event)) => {
-            *x += event.dx();
-            *y += event.dy();
-            Some(Event::Motion {
-                x: *x as i32,
-                y: *y as i32,
-            })
-        }
-        input::Event::Pointer(PointerEvent::ScrollWheel(e)) => {
-            let dx = if e.has_axis(Axis::Horizontal) {
-                e.scroll_value_v120(Axis::Horizontal) / 120.0
-            } else {
-                0.0
-            };
-            let dy = if e.has_axis(Axis::Vertical) {
-                e.scroll_value_v120(Axis::Vertical) / 120.0
-            } else {
-                0.0
-            };
-            Some(Event::Scroll {
-                unit: ScrollUnit::Detent,
-                dx,
-                dy,
-            })
-        }
-        input::Event::Pointer(PointerEvent::ScrollFinger(e)) => Some(e.into()),
-        input::Event::Pointer(PointerEvent::ScrollContinuous(e)) => Some(e.into()),
-        _ => None,
-    })
-}
-
 fn scroll_value<T: PointerScrollEvent>(e: &T, axis: Axis) -> Option<f64> {
     if e.has_axis(axis) {
         Some(e.scroll_value(axis))
@@ -230,29 +293,6 @@ impl<T: PointerScrollEvent> From<T> for Event {
             unit: ScrollUnit::Pixel,
             dx: scroll_value(&value, Axis::Horizontal).unwrap_or_default(),
             dy: scroll_value(&value, Axis::Vertical).unwrap_or_default(),
-        }
-    }
-}
-
-fn handle_inotify_events<'a>(
-    events: impl IntoIterator<Item = inotify::Event<&'a std::ffi::OsStr>>,
-    libinput: &mut Libinput,
-    devices: &mut HashMap<PathBuf, Device>,
-) {
-    for event in events {
-        if let Some(name) = event.name {
-            let path = PathBuf::from("/dev/input").join(name);
-            if !devices.contains_key(&path)
-                && (event.mask.contains(EventMask::CREATE)
-                    || event.mask.contains(EventMask::ATTRIB))
-                && let Some(device) = libinput.path_add_device(&path.display().to_string())
-            {
-                devices.insert(path, device);
-            } else if event.mask.contains(EventMask::DELETE)
-                && let Some(device) = devices.remove(&path)
-            {
-                libinput.path_remove_device(device);
-            }
         }
     }
 }
