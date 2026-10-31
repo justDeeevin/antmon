@@ -29,10 +29,7 @@ pub enum Event {
     ///
     /// [^1]: If the program is listening to an XWayland server, the "root window"
     /// isn't the entire screen, but rather a bounding box around all windows.
-    Motion {
-        x: i32,
-        y: i32,
-    },
+    Motion { x: i32, y: i32 },
     /// A keyboard key was pressed/released.
     Key {
         key: Key,
@@ -42,19 +39,13 @@ pub enum Event {
         state: ButtonState,
     },
     /// A mouse button was pressed/released.
-    Button {
-        button: Button,
-        state: ButtonState,
-    },
-    Scroll {
-        unit: ScrollUnit,
-        dx: f64,
-        dy: f64,
-    },
+    Button { button: Button, state: ButtonState },
+    /// The mouse scrolled.
+    Scroll { unit: ScrollUnit, dx: f64, dy: f64 },
 }
 
 #[derive(Debug)]
-/// Whether a scroll event is in units of mouse wheel detents (or "clicks") or logical pixels.
+/// Whether a scroll event is in units of mouse wheel detents (a.k.a. "clicks") or logical pixels.
 pub enum ScrollUnit {
     Detent,
     Pixel,

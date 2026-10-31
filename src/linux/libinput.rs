@@ -6,6 +6,10 @@
 //! Touchpad input is configured to use the [`Clickfinger`](ClickMethod::Clickfinger) click method
 //! and the [`TwoFinger`](ScrollMethod::TwoFinger) scroll method by default.
 //!
+//! Unfortunately, in order to implement the [`LibinputInterface`] trait, opening new device files is done
+//! synchronously. However, this only happens en masse on initialization and only happens
+//! infrequently during the stream's lifetime.
+//!
 //! [^1]: Both the `key` and `keycode` fields of [`Event::Key`] are the same.
 
 use crate::{

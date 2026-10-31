@@ -1,7 +1,7 @@
 use derive_more::Debug;
 use xkeysym::Keysym;
 
-/// Convert native platform keycodes to [`Key`]s.
+/// Convert platform-native key representations to [`Key`]s.
 pub mod convert;
 
 #[repr(u16)]
@@ -136,7 +136,6 @@ pub enum Key {
     PrintScreen = 210,
     Unknown(PlatformKey),
     // TODO: possibly more obscure keys.
-    // See https://docs.qmk.fm/keycodes_basic
 }
 
 #[derive(Debug, Clone, Copy)]
