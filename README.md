@@ -2,8 +2,6 @@
 
 Antmon is an async library for cross-platform global input monitoring. It's also what they call Ant-Man in Jamaica 😝
 
-It doesn't simply use a worker thread. It leverages file readininess notifications to entirely avoid blocking.
-
 ## Usage
 
 Antmon provides an opaque stream of events that can be created with [`events`]:

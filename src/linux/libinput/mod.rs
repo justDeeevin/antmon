@@ -7,6 +7,8 @@
 //! and the [`TwoFinger`](ScrollMethod::TwoFinger) scroll method by default. You can use
 //! [`devices_mut`](LibinputStream::devices_mut) or
 //! [`devices_list_mut`](LibinputStream::devices_list_mut) to change this configuration per-device.
+//! There are also methods to set default values for each config key that will be automatically
+//! applied to all existing devices and any newly-connected ones.
 //!
 //! Unfortunately, in order to implement the [`LibinputInterface`] trait, opening new device files is done
 //! synchronously. However, this only happens en masse on initialization and only happens
@@ -16,7 +18,7 @@
 
 use crate::{
     ButtonState, Event, EventError, ListenError, ScrollUnit, button::convert::linux_button,
-    key::convert::from_linux_keycode,
+    key::convert::from_linux_keycode, linux::libinput::config::Config,
 };
 use byor::{
     fd::{Fd, RuntimeFd},
@@ -26,12 +28,12 @@ use futures_core::{FusedStream, Stream};
 use futures_util::{StreamExt, ready};
 use inotify::{EventMask, Inotify, WatchMask};
 use input::{
-    ClickMethod, Device, DeviceCapability, Libinput, LibinputInterface, ScrollMethod,
     event::{
         PointerEvent,
         keyboard::{KeyState, KeyboardEventTrait},
         pointer::{Axis, PointerScrollEvent},
     },
+    *,
 };
 use pin_project::pin_project;
 use std::{
@@ -47,14 +49,12 @@ use std::{
 };
 use tracing::error;
 
+mod config;
+
 struct Interface;
 
 impl LibinputInterface for Interface {
-    fn open_restricted(
-        &mut self,
-        path: &std::path::Path,
-        flags: i32,
-    ) -> Result<std::os::unix::prelude::OwnedFd, i32> {
+    fn open_restricted(&mut self, path: &std::path::Path, flags: i32) -> Result<OwnedFd, i32> {
         OpenOptions::new()
             .read(true)
             .custom_flags(flags)
@@ -63,7 +63,7 @@ impl LibinputInterface for Interface {
             .map_err(|e| e.raw_os_error().unwrap())
     }
 
-    fn close_restricted(&mut self, _fd: std::os::unix::prelude::OwnedFd) {}
+    fn close_restricted(&mut self, _fd: OwnedFd) {}
 }
 
 type Result<T, E = EventError> = std::result::Result<T, E>;
@@ -119,6 +119,7 @@ pub async fn events<Rt: RuntimeFd + RuntimeFs>()
         libinput,
         cursor: (0.0, 0.0),
         queued_events: VecDeque::default(),
+        defaults: Config::default(),
     })
 }
 
@@ -133,6 +134,7 @@ pub struct LibinputStream<F> {
     libinput: Libinput,
     cursor: (f64, f64),
     queued_events: VecDeque<Event>,
+    defaults: Config,
 }
 
 impl<F> LibinputStream<F> {
@@ -167,6 +169,245 @@ impl<F> LibinputStream<F> {
     pub fn devices_list_mut(&mut self) -> impl Iterator<Item = &mut Device> {
         self.devices.values_mut()
     }
+
+    pub fn set_default_accel_config(&mut self, constructor: Option<fn() -> AccelConfig>) {
+        if constructor.map(|c| c()) == self.defaults.accel_config.map(|c| c()) {
+            return;
+        }
+        self.defaults.accel_config = constructor;
+        self.defaults.profile_override = None;
+        if let Some(constructor) = constructor {
+            for device in self.devices.values_mut() {
+                let _ = device.config_accel_apply(constructor());
+            }
+        }
+    }
+
+    pub fn set_default_accel_profile(&mut self, profile: Option<AccelProfile>) {
+        if profile == self.defaults.profile_override {
+            return;
+        }
+        self.defaults.profile_override = profile;
+        for device in self.devices_list_mut() {
+            if let Some(profile) = profile.or_else(|| device.config_accel_default_profile()) {
+                let _ = device.config_accel_set_profile(profile);
+            }
+        }
+    }
+
+    pub fn set_default_accel_speed(&mut self, speed: Option<f64>) {
+        if speed == self.defaults.accel_speed {
+            return;
+        }
+        self.defaults.accel_speed = speed;
+        for device in self.devices_list_mut() {
+            let _ = device.config_accel_set_speed(
+                speed.unwrap_or_else(|| device.config_accel_default_speed()),
+            );
+        }
+    }
+
+    pub fn set_default_area_rectangle(&mut self, rect: Option<AreaRectangle>) {
+        if rect == self.defaults.area_rectangle {
+            return;
+        }
+        self.defaults.area_rectangle = rect;
+        for device in self.devices_list_mut() {
+            let _ = device.config_area_set_rectangle(
+                rect.unwrap_or_else(|| device.config_area_get_default_rectangle()),
+            );
+        }
+    }
+
+    pub fn set_default_calibration_matrix(&mut self, matrix: Option<[f32; 6]>) {
+        if matrix == self.defaults.calibration_matrix {
+            return;
+        }
+        self.defaults.calibration_matrix = matrix;
+        for device in self.devices_list_mut() {
+            if let Some(matrix) = matrix.or_else(|| device.config_calibration_default_matrix()) {
+                let _ = device.config_calibration_set_matrix(matrix);
+            }
+        }
+    }
+
+    pub fn set_default_click_method(&mut self, method: Option<ClickMethod>) {
+        if method == self.defaults.click_method {
+            return;
+        }
+        self.defaults.click_method = method;
+        for device in self.devices_list_mut() {
+            if let Some(method) = method.or_else(|| device.config_click_default_method()) {
+                let _ = device.config_click_set_method(method);
+            }
+        }
+    }
+
+    pub fn set_default_clickfinger_button_map(&mut self, map: Option<ClickfingerButtonMap>) {
+        if map == self.defaults.clickfinger_button_map {
+            return;
+        }
+        self.defaults.clickfinger_button_map = map;
+        for device in self.devices_list_mut() {
+            let _ = device.config_click_clickfinger_set_button_map(
+                map.unwrap_or_else(|| device.config_click_clickfinger_default_button_map()),
+            );
+        }
+    }
+
+    pub fn set_default_dwt_enabled(&mut self, enabled: Option<bool>) {
+        if enabled == self.defaults.dwt_enabled {
+            return;
+        }
+        self.defaults.dwt_enabled = enabled;
+        for device in self.devices_list_mut() {
+            let _ = device.config_dwt_set_enabled(
+                enabled.unwrap_or_else(|| device.config_dwt_default_enabled()),
+            );
+        }
+    }
+
+    pub fn set_default_dwtp_enabled(&mut self, enabled: Option<bool>) {
+        if enabled == self.defaults.dwtp_enabled {
+            return;
+        }
+        self.defaults.dwtp_enabled = enabled;
+        for device in self.devices_list_mut() {
+            let _ = device.config_dwtp_set_enabled(
+                enabled.unwrap_or_else(|| device.config_dwtp_default_enabled()),
+            );
+        }
+    }
+
+    pub fn set_default_middle_emulation_enabled(&mut self, enabled: Option<bool>) {
+        if enabled == self.defaults.middle_emulation_enabled {
+            return;
+        }
+        self.defaults.middle_emulation_enabled = enabled;
+        for device in self.devices_list_mut() {
+            let _ = device.config_middle_emulation_set_enabled(
+                enabled.unwrap_or_else(|| device.config_middle_emulation_default_enabled()),
+            );
+        }
+    }
+
+    pub fn set_default_rotation_angle(&mut self, angle: Option<u32>) {
+        if angle == self.defaults.rotation_angle {
+            return;
+        }
+        self.defaults.rotation_angle = angle;
+        for device in self.devices_list_mut() {
+            let _ = device.config_rotation_set_angle(
+                angle.unwrap_or_else(|| device.config_rotation_default_angle()),
+            );
+        }
+    }
+
+    pub fn set_default_scroll_method(&mut self, method: Option<ScrollMethod>) {
+        if method == self.defaults.scroll_method {
+            return;
+        }
+        self.defaults.scroll_method = method;
+        for device in self.devices_list_mut() {
+            if let Some(method) = method.or_else(|| device.config_scroll_default_method()) {
+                let _ = device.config_scroll_set_method(method);
+            }
+        }
+    }
+
+    pub fn set_default_natural_scroll_enabled(&mut self, enabled: Option<bool>) {
+        if enabled == self.defaults.natural_scroll_enabled {
+            return;
+        }
+        self.defaults.natural_scroll_enabled = enabled;
+        for device in self.devices_list_mut() {
+            let _ = device.config_scroll_set_natural_scroll_enabled(
+                enabled.unwrap_or_else(|| device.config_scroll_default_natural_scroll_enabled()),
+            );
+        }
+    }
+
+    pub fn set_default_scroll_button(&mut self, button: Option<u32>) {
+        if button == self.defaults.scroll_button {
+            return;
+        }
+        self.defaults.scroll_button = button;
+        for device in self.devices_list_mut() {
+            let _ = device.config_scroll_set_button(
+                button.unwrap_or_else(|| device.config_scroll_default_button()),
+            );
+        }
+    }
+
+    pub fn set_default_scroll_button_lock(&mut self, state: Option<ScrollButtonLockState>) {
+        if state == self.defaults.scroll_button_lock {
+            return;
+        }
+        self.defaults.scroll_button_lock = state;
+        for device in self.devices_list_mut() {
+            let _ = device.config_scroll_set_button_lock(
+                state.unwrap_or_else(|| device.config_scroll_default_button_lock()),
+            );
+        }
+    }
+
+    pub fn set_default_send_events_mode(&mut self, mode: SendEventsMode) {
+        if self.defaults.send_events_mode == Some(mode) {
+            return;
+        }
+        self.defaults.send_events_mode = Some(mode);
+        for device in self.devices_list_mut() {
+            let _ = device.config_send_events_set_mode(mode);
+        }
+    }
+
+    pub fn set_default_3fg_drag_enabled(&mut self, state: Option<ThreeFingerDragState>) {
+        if state == self.defaults.threefg_drag_enabled {
+            return;
+        }
+        self.defaults.threefg_drag_enabled = state;
+        for device in self.devices_list_mut() {
+            let _ = device.config_3fg_drag_set_enabled(
+                state.unwrap_or_else(|| device.config_3fg_drag_get_default_enabled()),
+            );
+        }
+    }
+
+    pub fn set_default_tap_button_map(&mut self, map: Option<TapButtonMap>) {
+        if map == self.defaults.tap_button_map {
+            return;
+        }
+        self.defaults.tap_button_map = map;
+        for device in self.devices_list_mut() {
+            if let Some(map) = map.or_else(|| device.config_tap_default_button_map()) {
+                let _ = device.config_tap_set_button_map(map);
+            }
+        }
+    }
+
+    pub fn set_default_tap_drag_enabled(&mut self, enabled: Option<bool>) {
+        if enabled == self.defaults.tap_drag_enabled {
+            return;
+        }
+        self.defaults.tap_drag_enabled = enabled;
+        for device in self.devices_list_mut() {
+            let _ = device.config_tap_set_drag_enabled(
+                enabled.unwrap_or_else(|| device.config_tap_default_drag_enabled()),
+            );
+        }
+    }
+
+    pub fn set_default_tap_drag_lock_enabled(&mut self, state: Option<DragLockState>) {
+        if state == self.defaults.tap_drag_lock_enabled {
+            return;
+        }
+        self.defaults.tap_drag_lock_enabled = state;
+        for device in self.devices_list_mut() {
+            let _ = device.config_tap_set_drag_lock_enabled(
+                state.unwrap_or_else(|| device.config_tap_default_drag_lock_enabled()),
+            );
+        }
+    }
 }
 
 impl<F: Fd> Stream for LibinputStream<F> {
@@ -189,14 +430,15 @@ impl<F: Fd> Stream for LibinputStream<F> {
                             Ok(events) => {
                                 for event in events {
                                     if let Some(name) = event.name {
-                                        let path = PathBuf::from("/dev/input").join(name);
+                                        let path_string = format!("/dev/input/{}", name.display());
+                                        let path = PathBuf::from(&path_string);
                                         if !this.devices.contains_key(&path)
                                             && (event.mask.contains(EventMask::CREATE)
                                                 || event.mask.contains(EventMask::ATTRIB))
-                                            && let Some(device) = this
-                                                .libinput
-                                                .path_add_device(&path.display().to_string())
+                                            && let Some(mut device) =
+                                                this.libinput.path_add_device(&path_string)
                                         {
+                                            this.defaults.apply(&mut device);
                                             this.devices.insert(path, device);
                                         } else if event.mask.contains(EventMask::DELETE)
                                             && let Some(device) = this.devices.remove(&path)

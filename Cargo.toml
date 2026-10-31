@@ -25,9 +25,10 @@ pin-project = "1.1.13"
 x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
 
 input = { version = "0.10.0", default-features = false, features = [
-	"libinput_1_19",
+	"libinput_1_28",
 ] }
 inotify = { version = "0.11.5", default-features = false }
+smart-default = "0.7.1"
 
 wayland-client = "0.31.15"
 xkbcommon = "0.9.0"
