@@ -133,6 +133,39 @@ pub struct LibinputStream<F> {
     queued_events: VecDeque<Event>,
 }
 
+impl<F> LibinputStream<F> {
+    /// Get all of the devices currently plugged in.
+    pub fn devices(&self) -> &HashMap<PathBuf, Device> {
+        &self.devices
+    }
+
+    /// Get a list of all of the devices currently plugged in.
+    pub fn devices_list(&self) -> impl Iterator<Item = &Device> {
+        self.devices.values()
+    }
+
+    /// Get mutable access to all of the devices currently plugged in.
+    ///
+    /// This can be used to configure devices as desired.
+    ///
+    /// Note that this allocates a new map (though the keys and values are references to those owned
+    /// by the stream). If you don't need to look up devices by path, use
+    /// [`devices_list_mut`](Self::devices_list_mut) to save resources.
+    pub fn devices_mut(&mut self) -> HashMap<&Path, &mut Device> {
+        self.devices
+            .iter_mut()
+            .map(|(p, d)| (p.as_ref(), d))
+            .collect()
+    }
+
+    /// Get a list of mutable references to all of the devices currently plugged in.
+    ///
+    /// This can be used to configure devices as desired.
+    pub fn devices_list_mut(&mut self) -> impl Iterator<Item = &mut Device> {
+        self.devices.values_mut()
+    }
+}
+
 impl<F: Fd> Stream for LibinputStream<F> {
     type Item = Result<Event>;
 

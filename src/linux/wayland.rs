@@ -10,12 +10,18 @@
 use crate::{
     ButtonState, Event, EventError, Key, ListenError,
     key::{PlatformKey, convert::from_keysym},
+    linux::libinput::LibinputStream,
 };
-use byor::{fd::RuntimeFd, fs::RuntimeFs};
-use futures_core::FusedStream;
-use futures_util::StreamExt;
+use byor::{
+    fd::{Fd, RuntimeFd},
+    fs::RuntimeFs,
+};
+use derive_more::{Deref, DerefMut};
+use futures_core::{FusedStream, Stream};
+use futures_util::ready;
 use memmap2::MmapOptions;
-use std::collections::HashMap;
+use pin_project::pin_project;
+use std::{collections::HashMap, os::fd::OwnedFd, task::Poll};
 use wayland_client::{
     ConnectError, Connection, Dispatch, DispatchError, WEnum,
     globals::{BindError, GlobalError, GlobalListContents, registry_queue_init},
@@ -278,22 +284,50 @@ impl From<ButtonState> for KeyDirection {
 }
 
 pub async fn events<Rt: RuntimeFd + RuntimeFs>()
--> Result<impl FusedStream<Item = Result<Event, EventError>>, ListenError> {
+-> Result<WaylandStream<Rt::Fd<OwnedFd>>, ListenError> {
     let (keymap, outputs) = load_wayland_data()?;
-    let mut state = State::new(&keymap);
-    let [mut acc_x, mut acc_y, mut prev_x, mut prev_y] = [0; _];
+    let state = State::new(&keymap);
 
-    Ok(super::libinput::events::<Rt>().await?.map(move |r| {
-        Ok(match r? {
-            Event::Key {
+    Ok(WaylandStream {
+        state,
+        outputs,
+        acc: (0, 0),
+        prev: (0, 0),
+        inner: super::libinput::events::<Rt>().await?,
+    })
+}
+
+#[derive(Deref, DerefMut)]
+#[pin_project]
+pub struct WaylandStream<F> {
+    state: State,
+    outputs: Vec<Rect>,
+    acc: (i32, i32),
+    prev: (i32, i32),
+    #[pin]
+    #[deref]
+    #[deref_mut]
+    inner: LibinputStream<F>,
+}
+
+impl<F: Fd> Stream for WaylandStream<F> {
+    type Item = <LibinputStream<F> as Stream>::Item;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.project();
+        Poll::Ready(Some(Ok(match ready!(this.inner.poll_next(cx)) {
+            Some(Ok(Event::Key {
                 keycode,
                 state: key_state,
                 ..
-            } => {
+            })) => {
                 let xkb_keycode = xkb::Keycode::from(into_keycode(keycode)? + 8);
-                let key = from_keysym(state.key_get_one_sym(xkb_keycode));
+                let key = from_keysym(this.state.key_get_one_sym(xkb_keycode));
 
-                state.update_key(xkb_keycode, key_state.into());
+                this.state.update_key(xkb_keycode, key_state.into());
 
                 Event::Key {
                     keycode,
@@ -301,18 +335,24 @@ pub async fn events<Rt: RuntimeFd + RuntimeFs>()
                     key,
                 }
             }
-            Event::Motion { x, y } => {
-                let (dx, dy) = (x - prev_x, y - prev_y);
-                acc_x += dx;
-                acc_y += dy;
-                prev_x = x;
-                prev_y = y;
-                let (x, y) = clamp((acc_x, acc_y), &outputs);
-                acc_x = x;
-                acc_y = y;
+            Some(Ok(Event::Motion { x, y })) => {
+                let (dx, dy) = (x - this.prev.0, y - this.prev.1);
+                this.acc.0 += dx;
+                this.acc.1 += dy;
+                this.prev.0 = x;
+                this.prev.1 = y;
+                let (x, y) = clamp((this.acc.0, this.acc.1), this.outputs);
+                this.acc.0 = x;
+                this.acc.1 = y;
                 Event::Motion { x, y }
             }
-            e => e,
-        })
-    }))
+            o => return Poll::Ready(o),
+        })))
+    }
+}
+
+impl<F: Fd> FusedStream for WaylandStream<F> {
+    fn is_terminated(&self) -> bool {
+        self.inner.is_terminated()
+    }
 }
