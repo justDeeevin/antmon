@@ -13,12 +13,14 @@ use crate::{
 use byor::fd::{Fd, RuntimeFd};
 use derive_more::{Deref, DerefMut};
 use futures_core::{FusedStream, Stream};
+use pin_project::{pin_project, pinned_drop};
 use std::{
     collections::HashMap,
     ffi::*,
     marker::PhantomData,
     mem::MaybeUninit,
     os::fd::BorrowedFd,
+    pin::Pin,
     ptr::null,
     sync::mpsc::{Receiver, Sender, TryRecvError, channel},
     task::Poll,
@@ -165,9 +167,12 @@ pub fn events<Rt: RuntimeFd>() -> Result<impl FusedStream<Item = Result<Event>>,
     })
 }
 
+#[pin_project(PinnedDrop)]
 struct X11Stream<F> {
     rx: Receiver<Result<Event>>,
+    #[pin]
     record_fd: F,
+    #[pin]
     xi: Option<XIInfo<F>>,
     data_display: *mut Display,
     // Can't hold a Box because it would violate aliasing rules.
@@ -177,14 +182,17 @@ struct X11Stream<F> {
     dc: bool,
 }
 
+#[pin_project]
 struct XIInfo<F> {
+    #[pin]
     fd: F,
     opcode: c_int,
     scroll_info: HashMap<c_int, (XIScrollClassInfo, XIScrollClassInfo)>,
 }
 
-impl<F> Drop for X11Stream<F> {
-    fn drop(&mut self) {
+#[pinned_drop]
+impl<F> PinnedDrop for X11Stream<F> {
+    fn drop(self: Pin<&mut Self>) {
         let control_display = unsafe { (*self.closure).display };
         unsafe {
             XRecordDisableContext(control_display, self.context);
@@ -352,45 +360,44 @@ impl<F: Fd> Stream for X11Stream<F> {
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        if self.dc {
+        let mut this = self.project();
+
+        if *this.dc {
             return Poll::Ready(None);
         }
-        let control_display = unsafe { (*self.closure).display };
-        let this = unsafe { self.get_unchecked_mut() };
+
+        let control_display = unsafe { (**this.closure).display };
 
         'out: loop {
-            if this.process {
-                unsafe { XRecordProcessReplies(this.data_display) };
-                if let Some(XIInfo {
-                    opcode,
-                    scroll_info,
-                    ..
-                }) = &mut this.xi
-                {
+            if *this.process {
+                unsafe { XRecordProcessReplies(*this.data_display) };
+                if let Some(info) = this.xi.as_mut().as_pin_mut().map(XIInfo::project) {
                     while unsafe { XPending(control_display) } > 0 {
-                        if let Some(r) = smooth_scroll(control_display, *opcode, scroll_info) {
+                        if let Some(r) =
+                            smooth_scroll(control_display, *info.opcode, info.scroll_info)
+                        {
                             break 'out Poll::Ready(Some(r));
                         }
                     }
                 }
-                this.process = false;
+                *this.process = false;
             }
             match this.rx.try_recv() {
                 Ok(e) => break Poll::Ready(Some(e)),
                 Err(TryRecvError::Disconnected) => {
-                    this.dc = true;
+                    *this.dc = true;
                     break Poll::Ready(None);
                 }
                 Err(TryRecvError::Empty) => match this.record_fd.poll_readable(cx) {
                     Poll::Ready(Ok(())) => {
-                        this.process = true;
+                        *this.process = true;
                     }
                     Poll::Ready(Err(e)) => break Poll::Ready(Some(Err(e.into()))),
                     Poll::Pending => {
-                        if let Some(XIInfo { fd, .. }) = &this.xi {
-                            match fd.poll_readable(cx) {
+                        if let Some(info) = this.xi.as_mut().as_pin_mut().map(XIInfo::project) {
+                            match info.fd.poll_readable(cx) {
                                 Poll::Ready(Ok(())) => {
-                                    this.process = true;
+                                    *this.process = true;
                                 }
                                 v => {
                                     break v.map(|r| {
