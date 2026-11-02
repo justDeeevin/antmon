@@ -5,6 +5,11 @@ pub mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::events;
 
+#[cfg(target_os = "windows")]
+pub mod windows;
+#[cfg(target_os = "windows")]
+pub use windows::events;
+
 /// Mouse buttons.
 pub mod button;
 /// Keyboard keys.

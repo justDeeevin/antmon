@@ -1,11 +1,12 @@
 mod common;
 
-use futures_util::StreamExt;
+use futures_util::{StreamExt, pin_mut};
 
 fn main() {
     let mut timer = smol::Timer::interval(common::TICK_DURATION).fuse();
     smol::block_on(async {
-        let mut stream = antmon::events::<byor::runtime::Smol>().await.unwrap();
+        let stream = antmon::events::<byor::runtime::Smol>().await.unwrap();
+        pin_mut!(stream);
         loop {
             futures_util::select! {
                 _ = timer.next() => println!("tick"),

@@ -6,15 +6,19 @@ edition = "2024"
 [dependencies]
 x11 = "2.21.0"
 futures-core = "0.3.34"
-byor = { version = "4.0.0", default-features = false }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 async-stream = "0.3.6"
 derive_more = { version = "2.1.1", features = ["debug"] }
 xkeysym = "0.2.1"
+futures-util = "0.3.34"
+win_key_codes = "0.1.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-byor = { version = "4.0.0", default-features = false, features = ["fd", "fs"] }
+byor = { version = "5.0.0", default-features = false, features = [
+	"fd",
+	"fs",
+], path = "../byor" }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
 pin-project = "1.1.13"
 
@@ -23,7 +27,6 @@ x11 = { version = "2.21.0", features = ["xlib", "xrecord", "xinput"] }
 input = { version = "0.10.0", default-features = false, features = [
 	"libinput_1_19",
 ] }
-futures-util = "0.3.34"
 inotify = { version = "0.11.5", default-features = false }
 
 wayland-client = "0.31.15"
@@ -31,11 +34,22 @@ xkbcommon = "0.9.0"
 memmap2 = "0.9.12"
 wayland-protocols = { version = "0.32.13", features = ["client", "unstable"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+byor = { version = "5.0.0", default-features = false, features = [
+	"channel",
+], path = "../byor" }
+windows = { version = "0.62.2", features = [
+	"Win32_UI_WindowsAndMessaging",
+	"Win32_UI_Input_KeyboardAndMouse",
+] }
+windows-window = "0.100.0"
+windows-core = { version = "0.62.2", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["rt", "macros"] }
 smol = "2.0.2"
-byor = { version = "4.0.0", default-features = false, features = [
+byor = { version = "5.0.0", default-features = false, features = [
 	"tokio",
 	"smol",
-] }
+	"smol-oneshot",
+], path = "../byor" }

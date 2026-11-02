@@ -8,7 +8,7 @@
 use crate::{
     ButtonState, Event, EventError, ListenError, ScrollUnit,
     button::convert::x11_button,
-    key::convert::{from_keysym, linux_keycode},
+    key::convert::{from_keysym, from_linux_keycode},
 };
 use byor::fd::{Fd, RuntimeFd};
 use derive_more::{Deref, DerefMut};
@@ -471,7 +471,7 @@ unsafe extern "C" fn xrecord_callback(closure: *mut c_char, data: *mut XRecordIn
                 ButtonState::Released
             };
 
-            let keycode = linux_keycode(raw_keycode as u16 - 8);
+            let keycode = from_linux_keycode(raw_keycode as u16 - 8);
 
             let mut kb_state = MaybeUninit::uninit();
             if unsafe {

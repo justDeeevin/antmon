@@ -16,7 +16,7 @@
 
 use crate::{
     ButtonState, Event, EventError, ListenError, ScrollUnit, button::convert::linux_button,
-    key::convert::linux_keycode,
+    key::convert::from_linux_keycode,
 };
 use byor::{
     fd::{Fd, RuntimeFd},
@@ -236,7 +236,7 @@ impl<F: Fd> Stream for LibinputStream<F> {
 
             let mut events = this.libinput.filter_map(|e| match e {
                 input::Event::Keyboard(event) => {
-                    let keycode = linux_keycode(event.key() as u16);
+                    let keycode = from_linux_keycode(event.key() as u16);
                     Some(Event::Key {
                         keycode,
                         key: keycode,

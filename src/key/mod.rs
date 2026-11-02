@@ -5,7 +5,7 @@ use xkeysym::Keysym;
 pub mod convert;
 
 #[repr(u16)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// A keyboard key.
 pub enum Key {
     Escape = 1,
@@ -119,7 +119,8 @@ pub enum Key {
     Insert,
     Delete,
     Pause = 119,
-    Super = 125,
+    LeftSuper = 125,
+    RightSuper,
     Menu = 139,
     F13 = 183,
     F14,
@@ -138,7 +139,7 @@ pub enum Key {
     // TODO: possibly more obscure keys.
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// A platform-specific keycode.
 ///
 /// Consumers will usually only encounter the variant corresponding to the platform on which the program
@@ -147,4 +148,5 @@ pub enum Key {
 pub enum PlatformKey {
     Linux(#[debug("0x{_0:x}")] u16),
     X11(#[debug("0x{:x}", _0.raw())] Keysym),
+    Windows(#[debug("0x{_0:x}")] i32),
 }

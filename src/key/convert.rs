@@ -1,4 +1,5 @@
 use crate::{Key, key::PlatformKey};
+use win_key_codes::*;
 use xkeysym::Keysym;
 
 /// Match on the given type and convert it to a semantic key. There must be a match arm producing
@@ -8,19 +9,22 @@ macro_rules! key_conv {
     (
         $(#[$attr:meta])*
         $vis:vis $name:ident($platform:ident: $in:ty) {
-            $($p:pat => $key:ident,)*
+            $($(#[$patattr:meta])*$p:pat => $key:ident,)*
         }
     ) => {
         #[doc = concat!("Convert a native ", stringify!($platform), " keycode to its semantic representation.")]
         $(#[$attr])*
         $vis fn $name(code: $in) -> $crate::key::Key {
             use $crate::key::Key;
-            match Key::Super {
+            match Key::LeftSuper {
                 $(Key::$key => {})*
                 Key::Unknown(_) => {}
             }
             match code {
-                $($p => Key::$key,)*
+                $(
+                    $(#[$patattr])*
+                    $p => Key::$key,
+                )*
                 #[allow(unreachable_code)]
                 code => Key::Unknown($crate::key::PlatformKey::$platform(code))
             }
@@ -107,10 +111,11 @@ key_conv! {
         Keysym::slash | Keysym::question => Slash,
         Keysym::Shift_R => RightShift,
         Keysym::Control_L => LeftControl,
-        Keysym::Super_L => Super,
+        Keysym::Super_L  => LeftSuper,
+        Keysym::Super_R => RightSuper,
         Keysym::Alt_L => LeftAlt,
         Keysym::space => Space,
-        Keysym::Super_R => RightAlt,
+        Keysym::Alt_R => RightAlt,
         Keysym::Control_R => RightControl,
         Keysym::Up => Up,
         Keysym::Down => Down,
@@ -149,7 +154,8 @@ key_conv! {
     }
 }
 
-pub fn linux_keycode(code: u16) -> Key {
+/// Convert a native Linux keycode to its semantic representation.
+pub fn from_linux_keycode(code: u16) -> Key {
     match code {
         1..=83 | 87 | 88 | 96..=98 | 100 | 102..=111 | 119 | 125 | 139 | 183..=194 | 210 => {
             let discriminant = code.to_ne_bytes();
@@ -159,5 +165,127 @@ pub fn linux_keycode(code: u16) -> Key {
             unsafe { std::mem::transmute::<[u8; _], Key>(out) }
         }
         _ => Key::Unknown(PlatformKey::Linux(code)),
+    }
+}
+
+key_conv! {
+    pub from_windows_vkcode(Windows: i32) {
+        VK_ESCAPE => Escape,
+        VK_1 => One,
+        VK_2 => Two,
+        VK_3 => Three,
+        VK_4 => Four,
+        VK_5 => Five,
+        VK_6 => Six,
+        VK_7 => Seven,
+        VK_8 => Eight,
+        VK_9 => Nine,
+        VK_0 => Zero,
+        VK_OEM_MINUS => Minus,
+        VK_OEM_PLUS => Equal,
+        VK_BACK => Backspace,
+        VK_TAB => Tab,
+        VK_Q => Q,
+        VK_W => W,
+        VK_E => E,
+        VK_R => R,
+        VK_T => T,
+        VK_Y => Y,
+        VK_U => U,
+        VK_I => I,
+        VK_O => O,
+        VK_P => P,
+        VK_OEM_4 => LeftBracket,
+        VK_OEM_6 => RightBracket,
+        VK_RETURN => Enter,
+        VK_LCONTROL => LeftControl,
+        VK_A => A,
+        VK_S => S,
+        VK_D => D,
+        VK_F => F,
+        VK_G => G,
+        VK_H => H,
+        VK_J => J,
+        VK_K => K,
+        VK_L => L,
+        VK_OEM_1 => Semicolon,
+        VK_OEM_7 => Apostrophe,
+        VK_OEM_3 => Grave,
+        VK_LSHIFT => LeftShift,
+        VK_OEM_5 => BackSlash,
+        VK_Z => Z,
+        VK_X => X,
+        VK_C => C,
+        VK_V => V,
+        VK_B => B,
+        VK_N => N,
+        VK_M => M,
+        VK_OEM_COMMA => Comma,
+        VK_OEM_PERIOD => Period,
+        VK_OEM_2 => Slash,
+        VK_RSHIFT => RightShift,
+        VK_MULTIPLY => NumPadAsterisk,
+        VK_LMENU => LeftAlt,
+        VK_SPACE => Space,
+        VK_CAPITAL => CapsLock,
+        VK_F1 => F1,
+        VK_F2 => F2,
+        VK_F3 => F3,
+        VK_F4 => F4,
+        VK_F5 => F5,
+        VK_F6 => F6,
+        VK_F7 => F7,
+        VK_F8 => F8,
+        VK_F9 => F9,
+        VK_F10 => F10,
+        VK_NUMLOCK => NumLock,
+        VK_SCROLL => ScrollLock,
+        VK_NUMPAD7 => NumPadSeven,
+        VK_NUMPAD8 => NumPadEight,
+        VK_NUMPAD9 => NumPadNine,
+        VK_SUBTRACT => NumPadMinus,
+        VK_NUMPAD4 => NumPadFour,
+        VK_NUMPAD5 => NumPadFive,
+        VK_NUMPAD6 => NumPadSix,
+        VK_ADD => NumPadPlus,
+        VK_NUMPAD1 => NumPadOne,
+        VK_NUMPAD2 => NumPadTwo,
+        VK_NUMPAD3 => NumPadThree,
+        VK_NUMPAD0 => NumPadZero,
+        VK_DECIMAL => NumPadPeriod,
+        VK_F11 => F11,
+        VK_F12 => F12,
+        #[allow(unreachable_patterns, reason = "vk codes don't distinguish between numpad enter and regular enter")]
+        VK_RETURN => NumPadEnter,
+        VK_RCONTROL => RightControl,
+        VK_DIVIDE => NumPadSlash,
+        VK_RMENU => RightAlt,
+        VK_HOME => Home,
+        VK_UP => Up,
+        VK_PRIOR => PageUp,
+        VK_LEFT => Left,
+        VK_RIGHT => Right,
+        VK_END => End,
+        VK_DOWN => Down,
+        VK_NEXT => PageDown,
+        VK_INSERT => Insert,
+        VK_DELETE => Delete,
+        VK_PAUSE => Pause,
+        VK_LWIN => LeftSuper,
+        VK_RWIN => RightSuper,
+        VK_APPS => Menu,
+        VK_F13 => F13,
+        VK_F14 => F14,
+        VK_F15 => F15,
+        VK_F16 => F16,
+        VK_F17 => F17,
+        VK_F18 => F18,
+        VK_F19 => F19,
+        VK_F20 => F20,
+        VK_F21 => F21,
+        VK_F22 => F22,
+        VK_F23 => F23,
+        VK_F24 => F24,
+        VK_SNAPSHOT => PrintScreen,
     }
 }
