@@ -30,12 +30,16 @@ use windows_core::w;
 trait DynSender {
     type Item: 'static;
 
+    fn is_closed(&self) -> bool;
     fn dyn_send(&self, message: Self::Item) -> Result<(), Box<dyn Error>>;
 }
 
 impl<T: UnboundedSender<SendError: 'static>> DynSender for T {
     type Item = T::Item;
 
+    fn is_closed(&self) -> bool {
+        self.is_closed()
+    }
     fn dyn_send(&self, message: Self::Item) -> Result<(), Box<dyn Error>> {
         self.send(message)
             .map_err(|e| Box::new(e) as Box<dyn Error>)
@@ -123,7 +127,11 @@ fn keyboard_hook(ident: u32, event: &KBDLLHOOKSTRUCT) {
             key,
             state,
         }) {
-            error!(%error, "Failed to send key event");
+            if tx.is_closed() {
+                windows_window::quit();
+            } else {
+                error!(%error, "Failed to send key event");
+            }
         }
     });
 }
@@ -201,7 +209,11 @@ fn mouse_hook(ident: u32, event: &MSLLHOOKSTRUCT) {
             // TODO: maybe at some point use raw input to handle extra side buttons? idfk
             _ => return,
         }) {
-            error!(%error, "Failed to send mouse event");
+            if tx.is_closed() {
+                windows_window::quit();
+            } else {
+                error!(%error, "Failed to send mouse event");
+            }
         }
     });
 }
