@@ -13,12 +13,10 @@ derive_more = { version = "2.1.1", features = ["debug"] }
 xkeysym = "0.2.1"
 futures-util = "0.3.34"
 win_key_codes = "0.1.2"
+core-graphics = { version = "0.25.0", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-byor = { version = "5.0.0", default-features = false, features = [
-	"fd",
-	"fs",
-], path = "../byor" }
+byor = { version = "5.0.0", default-features = false, features = ["fd", "fs"] }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut"] }
 pin-project = "1.1.13"
 
@@ -36,15 +34,25 @@ memmap2 = "0.9.12"
 wayland-protocols = { version = "0.32.13", features = ["client", "unstable"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-byor = { version = "5.0.0", default-features = false, features = [
-	"channel",
-], path = "../byor" }
+byor = { version = "5.0.0", default-features = false, features = ["channel"] }
 windows = { version = "0.62.2", features = [
 	"Win32_UI_WindowsAndMessaging",
 	"Win32_UI_Input_KeyboardAndMouse",
 ] }
 windows-window = "0.100.0"
 windows-core = { version = "0.62.2", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+byor = { version = "5.0.0", default-features = false, features = ["channel"] }
+foreign-types = "0.5.0"
+
+[target.x86_64-apple-darwin.dependencies]
+core-foundation = { version = "0.10.1", default-features = false }
+
+[target.aarch64-apple-darwin.dependencies]
+core-graphics = "0.25.0"
+core-foundation = "0.10.1"
+
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["rt", "macros"] }
@@ -53,4 +61,4 @@ byor = { version = "5.0.0", default-features = false, features = [
 	"tokio",
 	"smol",
 	"smol-oneshot",
-], path = "../byor" }
+] }

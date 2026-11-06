@@ -1,3 +1,4 @@
+use core_graphics::event::CGKeyCode;
 use derive_more::Debug;
 use xkeysym::Keysym;
 
@@ -139,6 +140,68 @@ pub enum Key {
     // TODO: possibly more obscure keys.
 }
 
+impl Key {
+    /// Checks whether this key could be returned by [`from_char`](convert::from_char).
+    ///
+    /// Note that while numpad keys technically correspond to characters, they are indistinguishable
+    /// from their number-row counterparts and thus cannot be returned by `from_char`.
+    pub fn is_char(&self) -> bool {
+        use Key::*;
+        matches!(
+            self,
+            One | Two
+                | Three
+                | Four
+                | Five
+                | Six
+                | Seven
+                | Eight
+                | Nine
+                | Zero
+                | Minus
+                | Equal
+                | Backspace
+                | Tab
+                | Q
+                | W
+                | E
+                | R
+                | T
+                | Y
+                | U
+                | I
+                | O
+                | P
+                | LeftBracket
+                | RightBracket
+                | Enter
+                | A
+                | S
+                | D
+                | F
+                | G
+                | H
+                | J
+                | K
+                | L
+                | Semicolon
+                | Apostrophe
+                | Grave
+                | BackSlash
+                | Z
+                | X
+                | C
+                | V
+                | B
+                | N
+                | M
+                | Comma
+                | Period
+                | Slash
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// A platform-specific keycode.
 ///
@@ -149,4 +212,5 @@ pub enum PlatformKey {
     Linux(#[debug("0x{_0:x}")] u16),
     X11(#[debug("0x{:x}", _0.raw())] Keysym),
     Windows(#[debug("0x{_0:x}")] i32),
+    MacOS(#[debug("0x{_0:x}")] CGKeyCode),
 }

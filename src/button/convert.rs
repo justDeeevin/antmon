@@ -19,7 +19,13 @@ macro_rules! button_conv {
             match code {
                 $($p => Button::$button,)*
                 #[allow(unreachable_code)]
-                code => Button::Other(code as u8)
+                code => {
+                    #[allow(unused_comparisons)]
+                    if code > u8::MAX.into() || code < 0 {
+                        ::tracing::warn!(%code, "Unknown mouse button cannot fit within a u8");
+                    }
+                    Button::Other(code as u8)
+                }
             }
         }
     }
@@ -49,5 +55,15 @@ button_conv! {
         0x113 | 0x116 => Back,
         // BTN_EXTRA or BTN_FORWARD
         0x114 | 0x115 => Forward,
+    }
+}
+
+button_conv! {
+    pub from_macos_button(MacOS: i64) {
+        0 => Left,
+        1 => Right,
+        2 => Middle,
+        3 => Back,
+        4 => Forward,
     }
 }
