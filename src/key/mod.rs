@@ -1,4 +1,3 @@
-use core_graphics::event::CGKeyCode;
 use derive_more::Debug;
 use xkeysym::Keysym;
 
@@ -212,5 +211,5 @@ pub enum PlatformKey {
     Linux(#[debug("0x{_0:x}")] u16),
     X11(#[debug("0x{:x}", _0.raw())] Keysym),
     Windows(#[debug("0x{_0:x}")] i32),
-    MacOS(#[debug("0x{_0:x}")] CGKeyCode),
+    MacOS(#[debug("0x{_0:x}")] u16),
 }
