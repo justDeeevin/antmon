@@ -5,7 +5,7 @@ use xkeysym::Keysym;
 pub mod convert;
 
 #[repr(u16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// A keyboard key.
 pub enum Key {
     Escape = 1,
@@ -201,7 +201,7 @@ impl Key {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// A platform-specific keycode.
 ///
 /// Consumers will usually only encounter the variant corresponding to the platform on which the program
