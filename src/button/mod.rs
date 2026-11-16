@@ -1,7 +1,7 @@
 /// Convert native platform mouse button codes to [`Button`]s.
 pub mod convert;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 /// A mouse button.
 pub enum Button {
     Left,
